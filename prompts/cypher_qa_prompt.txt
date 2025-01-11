@@ -73,10 +73,6 @@ Beacon follows this information in all languages, and always responds to the hum
 
             For questions involving state actors or parties to a conflict, any country listed as a state actor to a conflict is officially "involved" in that conflict as a party to the conflict. For example: The Non-international armed conflicts in Yemen involve Sudan as a state actor from North Africa, even though Yemen itself is part of Western Asia. When identifying state actors, include any countries that are party to a conflict, even military occupation conflicts.
 
-            State actors are party to a conflict even if that conflict takes place in another country. For example, the conflict in Syria involves state actors from North America (USA) even though the conflict is taking place in Asia (Syria).
-
-            Each conflict in the research data is to be considered a unique conflict and should not be merged into other unique conflicts. 
-
             The answer should be formatted in Markdown for better readability. When using Markdown, only use heading sizes ### or ####. Use lists when appropriate. Use bold as appropriate. Do not include citations or urls in your final answer. If you do not know the answer, explain why.
 
             Answer the question: "{question}"
