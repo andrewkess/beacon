@@ -1,0 +1,497 @@
+Task: Generate a Cypher query to retreive relevent conflict data involving specific countries, state actors, non-state actors, geographical regions, or by conflict type.
+
+Instructions:
+- To retreive conflict data, first identify the actors party to the conflict as provided in the question. The `UN_M49Code` property is a number that represents the UN M49 Code of the relevant country or state actor. 
+- Ensure the query retrieves all conflicts, state actors, non-state actors, classifications, and other properties as specified.
+- If the question specifies a classification (e.g., "Military occupation, IAC, NIAC"), filter conflicts by their classification type using the `type` property of `ConflictType`.
+- Use only the provided relationship types and properties in the schema.
+- Do not use any other relationship types or properties that are not provided.
+
+
+Hierarchical UN M49 Regional Grouping:
+
+World (001)
+  ├── Africa (002)
+  │   ├── Northern Africa (015)
+  │   ├── Sub-Saharan Africa (202)
+  │   │   ├── Eastern Africa (014)
+  │   │   ├── Middle Africa (017)
+  │   │   ├── Southern Africa (018)
+  │   │   └── Western Africa (011)
+  ├── Americas (019)
+  │   ├── North America (003)
+  │   │   ├── Northern America (021)
+  │   │   ├── Caribbean (029)
+  │   │   └── Central America (013)
+  │   └── Latin America and the Caribbean (419)
+  │       ├── Caribbean (029)
+  │       ├── Central America (013)
+  │       └── South America (005)
+  ├── Antarctica (010)
+  ├── Asia (142)
+  │   ├── Central Asia (143)
+  │   ├── Eastern Asia (030)
+  │   ├── South-Eastern Asia (035)
+  │   ├── Southern Asia (034)
+  │   └── Western Asia (145)
+  ├── Europe (150)
+  │   ├── Eastern Europe (151)
+  │   ├── Northern Europe (154)
+  │   ├── Southern Europe (039)
+  │   └── Western Europe (155)
+  └── Oceania (009)
+      └── Small Island Developing States (SIDS) (722)
+
+Special Groups (Non-Hierarchical):
+  ├── Landlocked Developing Countries (LLDC) (432)
+  ├── Least Developed Countries (LDC) (199)
+  └── Small Island Developing States (SIDS) (722)
+
+
+
+729 for modern Sudan after the separation of South Sudan in 2011
+
+Use the hierarchical UN M49 regional groupings provided above to determine relationships between continents, subregions, and countries when generating Cypher queries. Follow these rules to ensure accurate data handling:
+
+    Always associate a conflict with the most specific applicable region.
+        Example: If a conflict occurs in Central America (013), associate it only with Central America.
+
+    For broader regional breakdowns, aggregate data by summing up results from subregions.
+        Example: To find totals for Americas (019), include results from:
+            Northern America (021)
+            Caribbean (029)
+            Central America (013)
+            South America (005).
+
+    Avoid associating a conflict with both a parent region and its subregion simultaneously.
+
+
+Schema:
+{schema}
+
+Note:
+- Do not include any explanations or apologies in your responses.
+- Do not respond to any questions that might ask for anything other than generating a Cypher statement.
+- Do not include any text except the generated Cypher statement.
+- Do not omit `conflict_details` unless conflicts are explicitly irrelevant to the question.
+
+
+Examples: Below are some examples of Cypher statements that adhere to the requirements:
+
+# Example: What conflicts is France involved in as a party to?
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor {{UN_M49Code: "250"}})
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{name: actor.name, labels: labels(actor), relationship_type: type(r)}}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS conflicts_involving_France,
+    COUNT(DISTINCT c) AS total_conflicts_involving_France,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+RETURN {{
+    total_conflicts_involving_France: total_conflicts_involving_France,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    conflict_details: conflicts_involving_France
+}} AS RULAC_research_results
+
+
+
+# Example IHL law search: "What IHL law applies to the conflict in Ukraine?" or "What are the IHL provisions applicable to conflicts involving Ukraine?"
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor {{UN_M49Code: "804"}})
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.applicable_law AS applicable_ihl_law,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{name: actor.name, labels: labels(actor), relationship_type: type(r)}}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        applicable_ihl_law: applicable_ihl_law,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS conflicts_involving_Ukraine,
+    COUNT(DISTINCT c) AS total_conflicts_involving_Ukraine
+RETURN {{
+    total_conflicts_involving_Ukraine: total_conflicts_involving_Ukraine,
+    conflict_details: conflicts_involving_Ukraine
+}} AS RULAC_research_results
+
+
+# Example of regional state actor search: What conflicts include state actors from West Africa?
+MATCH (gr:GeoRegion {{UN_M49Code: "011"}})<-[:BELONGS_TO]-(co:Country)-[:IS_PARTY_TO_CONFLICT]-(c:Conflict)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{name: actor.name, labels: labels(actor), relationship_type: type(r)}}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS conflicts_involving_West_African_state_actors,
+    COUNT(DISTINCT c) AS total_conflicts_involving_West_African_state_actors,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+RETURN {{
+    total_conflicts_involving_West_African_state_actors: total_conflicts_involving_West_African_state_actors,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    conflict_details: conflicts_involving_West_African_state_actors
+}} AS RULAC_research_results
+
+
+# Example of shared conflicts: What conflicts involve BOTH the USA and Russia?
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(usa:StateActor {{UN_M49Code: "840"}}), (c)-[:IS_PARTY_TO_CONFLICT]-(russia:StateActor {{UN_M49Code: "643"}})
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    c.applicable_law AS applicable_ihl_law,
+    COLLECT(DISTINCT {{name: actor.name, labels: labels(actor), relationship_type: type(r)}}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        applicable_ihl_law: applicable_ihl_law,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS conflicts_involving_both_USA_and_Russia_as_state_actors,
+    COUNT(DISTINCT c) AS total_conflicts_involving_both_USA_and_Russia_as_state_actors,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+RETURN {{
+    total_conflicts_involving_both_USA_and_Russia_as_state_actors: total_conflicts_involving_both_USA_and_Russia_as_state_actors,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    conflict_details: conflicts_involving_both_USA_and_Russia_as_state_actors
+}} AS RULAC_research_results
+
+
+# Example counting conflicts between 2 distinct parties: Are there more conflicts involving Russia or the USA as state actors?
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)
+WHERE sa.UN_M49Code IN ["643", "840"]
+OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(sa_russia:StateActor {{UN_M49Code: "643"}})
+OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(sa_usa:StateActor {{UN_M49Code: "840"}})
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    COUNT(DISTINCT sa_russia) AS conflicts_with_Russia,
+    COUNT(DISTINCT sa_usa) AS conflicts_with_USA,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name, 
+        labels: labels(actor), 
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    SUM(conflicts_with_Russia) AS total_armed_conflicts_with_Russia_as_state_actor,
+    SUM(conflicts_with_USA) AS total_armed_conflicts_with_USA_as_state_actor,
+    COUNT(DISTINCT c) AS total_number_armed_conflicts,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation,
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS detailed_conflict_information
+RETURN {{
+    total_number_armed_conflicts: total_number_armed_conflicts,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    total_armed_conflicts_with_Russia_as_state_actor: total_armed_conflicts_with_Russia_as_state_actor,
+    total_armed_conflicts_with_USA_as_state_actor: total_armed_conflicts_with_USA_as_state_actor,
+    comparison: CASE 
+        WHEN total_armed_conflicts_with_Russia_as_state_actor > total_armed_conflicts_with_USA_as_state_actor THEN "Russia is involved in more conflicts."
+        WHEN total_armed_conflicts_with_Russia_as_state_actor < total_armed_conflicts_with_USA_as_state_actor THEN "The USA is involved in more conflicts."
+        ELSE "Russia and the USA are involved in the same number of conflicts."
+    END,
+    conflict_details: detailed_conflict_information
+}} AS RULAC_research_results
+
+
+
+# Example search by conflict classification / type: What conflicts are classified as military occupations? How many are there total?
+MATCH (c:Conflict)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType {{type: "Military Occupation"}})
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name, 
+        labels: labels(actor), 
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS military_occupation_conflicts,
+    COUNT(DISTINCT c) AS total_conflicts_classified_as_military_occupation
+RETURN {{
+    total_conflicts_classified_as_military_occupation: total_conflicts_classified_as_military_occupation,
+    conflict_details: military_occupation_conflicts
+}} AS RULAC_research_results
+
+# Example of conflict lookup by geographical location of conflict: "What conflicts are currently taking place in Morocco?"
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]-(co:Country {{UN_M49Code: "504"}})
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name, 
+        labels: labels(actor), 
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS conflicts_taking_place_in_Morocco,
+    COUNT(DISTINCT c) AS total_conflicts_taking_place_in_Morocco,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+RETURN {{
+    total_conflicts_taking_place_in_Morocco: total_conflicts_taking_place_in_Morocco,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    conflict_details: conflicts_taking_place_in_Morocco
+}} AS RULAC_research_results
+
+
+# Example of conflict lookup by geographical regional location of conflict: "What conflicts are currently taking place in Southern Asia?" or "Are there any conflicts located in Southern Asia?" the key word is "IN", i.e. the location of a conflict not the state actor of a conflict. taking place = in
+MATCH (gr:GeoRegion {{UN_M49Code: "034"}})<-[:BELONGS_TO]-(co:Country)-[:IS_TAKING_PLACE_IN_COUNTRY]-(c:Conflict)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name, 
+        labels: labels(actor), 
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS conflicts_taking_place_in_Morocco,
+    COUNT(DISTINCT c) AS total_conflicts_taking_place_in_Morocco,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+RETURN {{
+    total_conflicts_taking_place_in_Morocco: total_conflicts_taking_place_in_Morocco,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    conflict_details: conflicts_taking_place_in_Morocco
+}} AS RULAC_research_results
+
+
+# Example of conflict lookup by country location: "What are the conflicts in Spain and Russia?"
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]-(country:Country)
+WHERE country.UN_M49Code IN ["724", "643"]
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    country.UN_M49Code AS country_code,
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name, 
+        labels: labels(actor), 
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    country_code,
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS country_conflict_details,
+    COUNT(DISTINCT c) AS total_conflicts_in_country,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+WITH 
+    country_code,
+    country_conflict_details,
+    total_conflicts_in_country,
+    total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation,
+    REDUCE(s = [], conflict IN country_conflict_details | s + conflict) AS all_conflict_details
+RETURN {{
+    total_conflicts_in_Spain: CASE 
+        WHEN country_code = "724" THEN total_conflicts_in_country ELSE 0 END,
+    total_conflicts_in_Russia: CASE 
+        WHEN country_code = "643" THEN total_conflicts_in_country ELSE 0 END,
+    total_of_type_international_armed_conflict_IAC_in_Spain: CASE 
+        WHEN country_code = "724" THEN total_of_type_international_armed_conflict_IAC ELSE 0 END,
+    total_of_type_non_international_armed_conflict_NIAC_in_Spain: CASE 
+        WHEN country_code = "724" THEN total_of_type_non_international_armed_conflict_NIAC ELSE 0 END,
+    total_of_type_military_occupation_in_Spain: CASE 
+        WHEN country_code = "724" THEN total_of_type_military_occupation ELSE 0 END,
+    total_of_type_international_armed_conflict_IAC_in_Russia: CASE 
+        WHEN country_code = "643" THEN total_of_type_international_armed_conflict_IAC ELSE 0 END,
+    total_of_type_non_international_armed_conflict_NIAC_in_Russia: CASE 
+        WHEN country_code = "643" THEN total_of_type_non_international_armed_conflict_NIAC ELSE 0 END,
+    total_of_type_military_occupation_in_Russia: CASE 
+        WHEN country_code = "643" THEN total_of_type_military_occupation ELSE 0 END,
+    conflict_details: all_conflict_details
+}} AS RULAC_research_results
+
+
+# Example conflict lookup by non-state actor: "What conflicts involve JNIM as an actor?" (always use CONTAINS)
+MATCH (c:Conflict)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WHERE toLower(actor.name) CONTAINS toLower("JNIM")
+   OR any(alias IN actor.aliases WHERE toLower(alias) CONTAINS toLower("JNIM"))
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(other_actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: other_actor.name, 
+        labels: labels(other_actor), 
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS conflicts_involving_JNIM,
+    COUNT(DISTINCT c) AS total_conflicts_involving_JNIM,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+RETURN {{
+    total_conflicts_involving_JNIM: total_conflicts_involving_JNIM,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    conflict_details: conflicts_involving_JNIM
+}} AS RULAC_research_results
+
+
+
+# Example of looking up conflict by type/classification taking place or in a geographic regional location  "How many IACs are taking place in Europe?"
+MATCH (gr:GeoRegion {{UN_M49Code: "150"}})<-[:BELONGS_TO]-(co:Country)-[:IS_TAKING_PLACE_IN_COUNTRY]-(c:Conflict)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType {{type: "International Armed Conflict (IAC)"}})
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    c,
+    c.name AS conflict_name,
+    ct.type AS conflict_classification,
+    c.overview AS conflict_overview,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name, 
+        labels: labels(actor), 
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    COLLECT({{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        conflict_citation: conflict_citation,
+        conflict_parties: conflict_parties
+    }}) AS IACS_taking_place_in_Europe,
+    COUNT(DISTINCT c) AS total_IACS_taking_place_in_Europe,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN c END) AS total_of_type_international_armed_conflict_IAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_of_type_non_international_armed_conflict_NIAC,
+    COUNT(DISTINCT CASE WHEN conflict_classification = "Military Occupation" THEN c END) AS total_of_type_military_occupation
+RETURN {{
+    total_IACS_taking_place_in_Europe: total_IACS_taking_place_in_Europe,
+    total_of_type_international_armed_conflict_IAC: total_of_type_international_armed_conflict_IAC,
+    total_of_type_non_international_armed_conflict_NIAC: total_of_type_non_international_armed_conflict_NIAC,
+    total_of_type_military_occupation: total_of_type_military_occupation,
+    conflict_details: IACS_taking_place_in_Europe
+}} AS RULAC_research_results
+
+
+
+The question is:
+{question}
+
+Remember: ONly return the cypher command itself. Start with the word "MATCH"
