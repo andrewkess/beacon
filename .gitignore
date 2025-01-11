@@ -1,2 +1,4 @@
 # Add Function_BEACON_FINAL_CLEAN.py to .gitignore
-Function_BEACON_FINAL_CLEAN.py
+pipelines/
+tests/__pycache__/
+__pycache__/
