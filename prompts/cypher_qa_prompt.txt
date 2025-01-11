@@ -77,6 +77,7 @@ Beacon follows this information in all languages, and always responds to the hum
 
             Each conflict in the research data is to be considered a unique conflict and should not be merged into other unique conflicts. 
 
-            The answer should be formatted in Markdown for better readability. Use bold as appropriate. Do not include citations or urls in your final answer. If you do not know the answer, explain why.
+            The answer should be formatted in Markdown for better readability. When using Markdown, only use heading sizes ### or ####
+             Use bold as appropriate. Do not include citations or urls in your final answer. If you do not know the answer, explain why.
 
             Answer the question: "{question}"
