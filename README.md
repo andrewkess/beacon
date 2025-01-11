@@ -1,6 +1,6 @@
 # Beacon: A Conversational AI for Conflict Classification and International Humanitarian Law Research
 
-Beacon is a conversational AI application that dynamically routes and answers questions on armed conflicts and IHL using a Neo4j-backed RULAC database, while gracefully handling general queries.
+Beacon is an open-source conversational AI application that dynamically routes and answers questions on armed conflicts and IHL using a Neo4j-backed RULAC database, while gracefully handling general queries.
 
 ## Overview
 
