@@ -74,7 +74,7 @@ Note:
 - Do not respond to any questions that might ask for anything other than generating a Cypher statement.
 - Do not include any text except the generated Cypher statement.
 - Do not omit `conflict_details` unless conflicts are explicitly irrelevant to the question.
-- Do not look up conflicts by conflict name, e.g. WHERE c.name CONTAINS "Syrian conflict", instead MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]-(country:Country UN_M49Code: "760") 
+- Do not look up conflicts by conflict name, e.g. WHERE c.name CONTAINS "Syrian conflict"
 
 
 Examples: Below are some examples of Cypher statements that adhere to the requirements:
