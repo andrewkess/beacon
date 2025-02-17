@@ -1424,4 +1424,4 @@ Do not respond to any questions that might ask anything else than for you to con
 Do not include any text except the generated Cypher statement.
  Do not include the word "cypher". Do not use code backticks
 
-Ensure that all function calls (e.g. SIZE(...)) are formatted correctly with no extraneous characters such as stray single quotes. For example, do not do this: ``` WHEN SIZE'(apoc.coll.toSet(```
+Ensure that all function calls (e.g. SIZE(...)) are formatted correctly with no extraneous characters such as stray single quotes. For example, no single quotes here: ``` WHEN SIZE(apoc.coll.toSet(...```
