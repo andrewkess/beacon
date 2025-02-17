@@ -520,7 +520,7 @@ WITH ["250", "643"] AS target_state_actor_UN_M49_codes,
 
 // Match the state actor(s)
 MATCH (sa:StateActor)
-WHERE (size(target_state_actor_UN_M49_codes) = 0 OR sa.UN_M49Code IN target_state_actor_UN_M49_codes)
+WHERE (SIZE(target_state_actor_UN_M49_codes) = 0 OR sa.UN_M49Code IN target_state_actor_UN_M49_codes)
 
 // OPTIONAL MATCH to get all related conflicts, their actors, and conflict types
 OPTIONAL MATCH (sa)-[:IS_PARTY_TO_CONFLICT]->(c:Conflict)
@@ -542,7 +542,7 @@ WITH sa,
      [conflict IN all_conflicts 
        WHERE conflict IS NOT NULL 
          AND ( target_conflict_types IS NULL 
-               OR size(target_conflict_types)=0 
+               OR SIZE(target_conflict_types)=0 
                OR ANY(t IN target_conflict_types 
                       WHERE EXISTS((conflict)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(:ConflictType {{type: t}}))
                      )
@@ -551,7 +551,7 @@ WITH sa,
      [item IN all_conflict_types 
        WHERE item.conflict IS NOT NULL 
          AND ( target_conflict_types IS NULL 
-               OR size(target_conflict_types)=0 
+               OR SIZE(target_conflict_types)=0 
                OR ANY(t IN target_conflict_types WHERE item.type = t)
          )
      ] AS conflict_types,
@@ -567,7 +567,7 @@ WITH COLLECT({{
   conflicts: conflicts,
   all_actors: all_actors,
   conflict_types: conflict_types,
-  conflict_count: size(conflicts) // Add conflict count for ordering
+  conflict_count: SIZE(conflicts) // Add conflict count for ordering
 }}) AS state_conflict_data, target_conflict_types, target_state_actor_UN_M49_codes
 
 // Order the state actors by conflict count in ascending order by default, for top rankings
@@ -578,7 +578,7 @@ WITH apoc.coll.sortMaps(state_conflict_data, "conflict_count") AS state_conflict
 
 // limit to the top 10 state actors if no specific UN_M49 codes or target types are provided (i.e. a worldwide query)
 WITH CASE 
-  WHEN size(target_state_actor_UN_M49_codes) = 0 AND size(target_conflict_types) = 0 
+  WHEN SIZE(target_state_actor_UN_M49_codes) = 0 AND SIZE(target_conflict_types) = 0 
   THEN sorted_state_conflict_data[0..10] // use another limit for 10 if directly mentioned in question, eg. "top/bottom five state actors" would become "sorted_state_conflict_data[0..5]"
   ELSE sorted_state_conflict_data
 END AS state_conflict_data, target_conflict_types, target_state_actor_UN_M49_codes
@@ -587,9 +587,9 @@ END AS state_conflict_data, target_conflict_types, target_state_actor_UN_M49_cod
 WITH state_conflict_data, target_conflict_types, target_state_actor_UN_M49_codes,
      apoc.text.join(
        [d IN state_conflict_data 
-         WHERE size(apoc.coll.toSet(d.conflicts)) > 0 |
+         WHERE SIZE(apoc.coll.toSet(d.conflicts)) > 0 |
          d.state_actor_name + " is a state actor to " +
-         toString(size(apoc.coll.toSet(d.conflicts))) + " distinct armed conflict(s) (" +
+         toString(SIZE(apoc.coll.toSet(d.conflicts))) + " distinct armed conflict(s) (" +
          apoc.text.join(
            apoc.coll.toSet([conf IN d.conflicts WHERE conf IS NOT NULL | conf.name]), ", "
          ) + ")"
@@ -602,17 +602,17 @@ WITH state_conflict_data, target_conflict_types, target_state_actor_UN_M49_codes
 WITH breakdownText, 
   global_conflicts, 
   target_conflict_types, //optional if filter applied
-     size(global_conflicts) AS total_distinct_conflicts, state_conflict_data, target_state_actor_UN_M49_codes
+     SIZE(global_conflicts) AS total_distinct_conflicts, state_conflict_data, target_state_actor_UN_M49_codes
 WITH CASE
        WHEN total_distinct_conflicts = 0 THEN
          "According to RULAC, there are currently no recorded armed conflicts" +
-         (CASE WHEN target_conflict_types IS NOT NULL AND size(target_conflict_types) > 0 THEN
+         (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
            " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], ", ") ELSE "" END) +
          " involving the following state actors: " + apoc.text.join(apoc.coll.toSet([d IN state_conflict_data | d.state_actor_name]), ", ") + "."
        ELSE
          "According to RULAC, there are currently " + toString(total_distinct_conflicts) +
          " total distinct armed conflict(s)" +
-         (CASE WHEN target_conflict_types IS NOT NULL AND size(target_conflict_types) > 0 THEN
+         (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
            " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], " and/or ") ELSE "" END) +
          " involving the following state actors: " + apoc.text.join(apoc.coll.toSet([d IN state_conflict_data WHERE d.conflict_count > 0 | d.state_actor_name]), ", ") +
          ". Breakdown by state actor: " + breakdownText + "."
@@ -693,7 +693,7 @@ WITH ["422", "800"] AS target_country_UN_M49_codes,
 
 // Ensure we always get a Country node by matching the Country nodes first.
 MATCH (co:Country)
-WHERE (size(target_country_UN_M49_codes) = 0 OR co.UN_M49Code IN target_country_UN_M49_codes)
+WHERE (SIZE(target_country_UN_M49_codes) = 0 OR co.UN_M49Code IN target_country_UN_M49_codes)
 
 // MATCH to retrieve all conflicts taking place in that country, along with any related actors and conflict types.
 OPTIONAL MATCH (co)<-[:IS_TAKING_PLACE_IN_COUNTRY]-(c:Conflict)
@@ -715,7 +715,7 @@ WITH co,
      [conflict IN all_conflicts 
        WHERE conflict IS NOT NULL 
          AND ( target_conflict_types IS NULL 
-               OR size(target_conflict_types) = 0 
+               OR SIZE(target_conflict_types) = 0 
                OR ANY(t IN target_conflict_types 
                       WHERE EXISTS((conflict)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(:ConflictType {{type: t}}))
                      )
@@ -724,7 +724,7 @@ WITH co,
      [item IN all_conflict_types 
        WHERE item.conflict IS NOT NULL 
          AND ( target_conflict_types IS NULL 
-               OR size(target_conflict_types) = 0 
+               OR SIZE(target_conflict_types) = 0 
                OR ANY(t IN target_conflict_types WHERE item.type = t)
          )
      ] AS conflict_types,
@@ -737,7 +737,7 @@ WITH COLLECT({{
   country_name: co.name,
   country_code: co.UN_M49Code,
   conflicts: conflicts,
-  conflict_count: size(conflicts),
+  conflict_count: SIZE(conflicts),
   conflict_names: [conf IN conflicts | conf.name],
   all_actors: all_actors,
   conflict_types: conflict_types
@@ -761,7 +761,7 @@ WITH apoc.coll.sortMaps(country_conflict_data, "conflict_count") AS sorted_count
 
 //  limit to 10 countries if no specific UN_M49 codes or conflict types are provided
 WITH CASE
-  WHEN size(target_country_UN_M49_codes) = 0 AND size(target_conflict_types) = 0 
+  WHEN SIZE(target_country_UN_M49_codes) = 0 AND SIZE(target_conflict_types) = 0 
   THEN sorted_country_conflict_data[0..10] // use another limit for 10 if directly mentioned in question, eg. "top five countries" would become "sorted_country_conflict_data[0..5]"
   ELSE sorted_country_conflict_data
 END AS country_conflict_data,
@@ -782,18 +782,18 @@ WITH country_conflict_data, target_conflict_types,
 
 // Count total distinct conflicts and prepare summary data.
 WITH breakdownText, global_conflicts, target_conflict_types,
-     size(global_conflicts) AS total_distinct_conflicts, country_conflict_data
+     SIZE(global_conflicts) AS total_distinct_conflicts, country_conflict_data
 WITH CASE
        WHEN total_distinct_conflicts = 0 THEN
          "According to RULAC, there are currently no recorded armed conflicts" +
-         (CASE WHEN target_conflict_types IS NOT NULL AND size(target_conflict_types) > 0 THEN
+         (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
            " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], " and/or ") ELSE "" END) +
          " taking place in the following countries: " + 
          apoc.text.join(apoc.coll.toSet([d IN country_conflict_data | d.country_name]), ", ") + "."
        ELSE
          "According to RULAC, there are currently " + toString(total_distinct_conflicts) +
          " total distinct armed conflict(s)" +
-         (CASE WHEN target_conflict_types IS NOT NULL AND size(target_conflict_types) > 0 THEN
+         (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
            " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], " and/or ") ELSE "" END) +
          " taking place in the following countries: " + 
          apoc.text.join(apoc.coll.toSet([d IN country_conflict_data WHERE d.conflict_count > 0 | d.country_name]), ", ") +
@@ -813,7 +813,7 @@ WITH summary_text, [conf IN global_conflicts | {{
     applicable_ihl_law:      COALESCE(conf.applicable_law, "Not Specified"),
     conflict_citation:       COALESCE(conf.citation, "No Citation Available"),
     state_parties:           CASE 
-                               WHEN size(apoc.coll.toSet(
+                               WHEN SIZE(apoc.coll.toSet(
                                      [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
                                       WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
                                    )) = 0 
@@ -828,7 +828,7 @@ WITH summary_text, [conf IN global_conflicts | {{
                                    )
                              END,
     non_state_parties:       CASE 
-                               WHEN size(apoc.coll.toSet(
+                               WHEN SIZE(apoc.coll.toSet(
                                      [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
                                       WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
                                    )) = 0 
@@ -908,7 +908,7 @@ WITH co, region_code, region_name, target_region_UN_M49_codes, target_conflict_t
          AND (
            // If no conflict_types given, keep all conflicts;
            // otherwise, check if this conflict matches at least one target type
-           target_conflict_types IS NULL OR size(target_conflict_types) = 0
+           target_conflict_types IS NULL OR SIZE(target_conflict_types) = 0
            OR ANY(t IN target_conflict_types
                   WHERE EXISTS((conflict)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(:ConflictType {{type: t}})))
          )
@@ -916,7 +916,7 @@ WITH co, region_code, region_name, target_region_UN_M49_codes, target_conflict_t
      [item IN COLLECT(DISTINCT {{ conflict: c, type: ct.type }})
        WHERE item.conflict IS NOT NULL
          AND (
-           target_conflict_types IS NULL OR size(target_conflict_types) = 0
+           target_conflict_types IS NULL OR SIZE(target_conflict_types) = 0
            OR ANY(t IN target_conflict_types WHERE item.type = t)
          )
      ] AS conflict_types,
@@ -931,7 +931,7 @@ WITH target_region_UN_M49_codes, target_conflict_types, region_dictionary,
        region:         region_name,
        region_code:    region_code,
        conflicts:      conflicts,
-       conflict_count: size(conflicts),
+       conflict_count: SIZE(conflicts),
        conflict_names: [conf IN conflicts | conf.name],
        all_actors:     all_actors,
        conflict_types: conflict_types
@@ -960,7 +960,7 @@ WITH country_conflict_data, target_conflict_types,
      [r IN region_conflicts |
        {{
          region_name:   r.region_name,
-         conflict_count: size(r.conflicts)
+         conflict_count: SIZE(r.conflicts)
        }}
      ] AS region_conflict_counts
 
@@ -984,7 +984,7 @@ WITH country_conflict_data, target_conflict_types, region_conflict_counts,
      CASE
        WHEN region_count = 1 OR max_conflict_count = 0 THEN ""
        WHEN region_count > 1 AND max_conflict_count = 0 THEN "Neither region has recorded conflicts."
-       WHEN size(leading_regions) > 1 THEN
+       WHEN SIZE(leading_regions) > 1 THEN
          "Both " + apoc.text.join(leading_regions, " and ") + " regions have the same number of recorded conflicts."
        ELSE
          leading_regions[0] + " has the most recorded conflicts."
@@ -1017,7 +1017,7 @@ WITH country_conflict_data, region_conflict_counts, dominant_region_summary, bre
 
 // This CASE statement is in its own step:
 CASE 
-  WHEN target_conflict_types IS NOT NULL AND size(target_conflict_types) > 0
+  WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0
   THEN
     "According to RULAC, among recorded conflicts classified as " +
     apoc.text.join(
@@ -1075,7 +1075,7 @@ WITH summary_text,
          applicable_ihl_law:      COALESCE(conf.applicable_law, "Not Specified"),
          conflict_citation:       COALESCE(conf.citation, "No Citation Available"),
          state_parties: CASE
-           WHEN size(apoc.coll.toSet(
+           WHEN SIZE(apoc.coll.toSet(
              [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
               WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
            )) = 0
@@ -1090,7 +1090,7 @@ WITH summary_text,
            )
          END,
          non_state_parties: CASE
-           WHEN size(apoc.coll.toSet(
+           WHEN SIZE(apoc.coll.toSet(
              [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
               WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
            )) = 0
@@ -1171,7 +1171,7 @@ WITH sa, c, actor, ct, target_conflict_types, target_state_actor_UN_M49_codes, t
 
 // Count total distinct conflicts and prepare summary data
 WITH breakdownText, global_conflicts, target_conflict_types, state_conflict_data, target_organization_name, 
-     size(global_conflicts) AS total_distinct_conflicts
+     SIZE(global_conflicts) AS total_distinct_conflicts
 WITH CASE
        WHEN total_distinct_conflicts = 0 THEN
          "According to RULAC, there are currently no recorded armed conflicts classified as " +
@@ -1232,17 +1232,17 @@ WITH country_conflict_data, target_conflict_types, target_organization_name,
 
 // Count total distinct conflicts and prepare summary data.
 WITH breakdownText, global_conflicts, target_conflict_types, target_organization_name, , 
-     size(global_conflicts) AS total_distinct_conflicts, country_conflict_data
+     SIZE(global_conflicts) AS total_distinct_conflicts, country_conflict_data
 WITH CASE
        WHEN total_distinct_conflicts = 0 THEN
          "According to RULAC, there are currently no recorded armed conflicts" +
-         (CASE WHEN target_conflict_types IS NOT NULL AND size(target_conflict_types) > 0 THEN
+         (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
            " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], " and/or ") ELSE "" END) +
          " taking place in the following " + apoc.text.join(target_organization_name, ", ") + " member countries: " + apoc.text.join(apoc.coll.toSet([d IN country_conflict_data | d.country_name]), ", ") + "."
        ELSE
          "According to RULAC, there are currently " + toString(total_distinct_conflicts) +
          " total distinct armed conflict(s)" +
-         (CASE WHEN target_conflict_types IS NOT NULL AND size(target_conflict_types) > 0 THEN
+         (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
            " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], " and/or ") ELSE "" END) +
          " taking place in the following " + apoc.text.join(target_organization_name, ", ") + " member countries: " + apoc.text.join(apoc.coll.toSet([d IN country_conflict_data | d.country_name]), " , ") +
          ". Breakdown by member country: " + breakdownText + "."
@@ -1307,7 +1307,7 @@ WITH COLLECT({{
 // Step 5: Flatten conflicts and prepare summary info
 WITH non_state_actor_conflict_data,
      apoc.coll.toSet(apoc.coll.flatten([d IN non_state_actor_conflict_data | d.conflicts])) AS global_conflicts
-WITH size(global_conflicts) AS total_distinct_conflicts,
+WITH SIZE(global_conflicts) AS total_distinct_conflicts,
      apoc.text.join([gc IN global_conflicts | gc.name], ", ") AS conflict_names_list,
      non_state_actor_conflict_data,
      global_conflicts
@@ -1337,7 +1337,7 @@ WITH summary_text,
        applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
        conflict_citation: COALESCE(conf.citation, "No Citation Available"),
        state_parties: CASE
-         WHEN size(apoc.coll.toSet(
+         WHEN SIZE(apoc.coll.toSet(
            [p IN apoc.coll.flatten([d IN non_state_actor_conflict_data | d.all_actors])
             WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
          )) = 0
@@ -1352,7 +1352,7 @@ WITH summary_text,
          )
        END,
        non_state_parties: CASE
-         WHEN size(apoc.coll.toSet(
+         WHEN SIZE(apoc.coll.toSet(
            [p IN apoc.coll.flatten([d IN non_state_actor_conflict_data | d.all_actors])
             WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
          )) = 0
@@ -1396,7 +1396,7 @@ WITH [] AS target_state_actor_UN_M49_codes, //  target all state actors in the w
   ["International Armed Conflict (IAC)"] AS target_conflict_types  // Define target IAC conflict type
 
 MATCH (sa:StateActor)
-WHERE (size(target_state_actor_UN_M49_codes) = 0 OR sa.UN_M49Code IN target_state_actor_UN_M49_codes)
+WHERE (SIZE(target_state_actor_UN_M49_codes) = 0 OR sa.UN_M49Code IN target_state_actor_UN_M49_codes)
 
 // continue with Pattern 1
 
@@ -1424,4 +1424,4 @@ Do not respond to any questions that might ask anything else than for you to con
 Do not include any text except the generated Cypher statement.
  Do not include the word "cypher". Do not use code backticks
 
-Ensure that all function calls (e.g. SIZE(...)) are formatted correctly with no extraneous characters such as stray single quotes.
+Ensure that all function calls (e.g. SIZE(...)) are formatted correctly with no extraneous characters such as stray single quotes. For example, do not do this: ``` WHEN SIZE'(apoc.coll.toSet(```
