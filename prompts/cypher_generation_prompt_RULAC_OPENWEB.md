@@ -1422,6 +1422,9 @@ WITH [] AS target_country_UN_M49_codes, //  target all countries in the world
 Remember, your task is to return a single cypher query for the user research question. Note: Do not include any explanations or apologies in your responses.
 Do not respond to any questions that might ask anything else than for you to construct a Cypher statement.
 Do not include any text except the generated Cypher statement.
- Do not include the word "cypher". Do not use code backticks
+ Do not include the word "cypher". Wrap the query in code backticks.
 
-Ensure that all function calls (e.g. SIZE(...)) are formatted correctly with no extraneous characters such as stray single quotes. For example, no single quotes here: ``` WHEN SIZE(apoc.coll.toSet(...```
+Ensure that all function calls (e.g. SIZE(...)) are formatted correctly with no extraneous characters such as stray single quotes on either side. For example, 
+
+do this:  ``` WHEN SIZE(apoc.coll.toSet(```
+not this: ```WHEN SIZE'(apoc.coll.toSet(```
