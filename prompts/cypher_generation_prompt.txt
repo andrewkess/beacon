@@ -24,7 +24,7 @@ Inside this object, include:
 # Instructions
 1. Identify any actors, countries, regions, or conflict types mentioned in the question.
 2. Use **only** the relationship types and properties provided in the schema. Do not use anything else that is not in the schema.
-3. Ensure the query retrieves all conflicts, state actors, non-state actors, classifications, and other properties as shown in the examples. There MUST be an OPTIONAL MATCH on key nodes (Actor) (ConflictType) in order to collect conflict details. After matching conflicts, all actors, and conflict–type pairs, collect them using a separate \`WITH\` statement 
+3. Ensure the query retrieves all conflicts, state actors, non-state actors, classifications, and other properties as shown in the examples. There MUST be an OPTIONAL MATCH on key nodes (Actor) (ConflictType) in order to collect conflict details. After matching conflicts, all actors, and conflict–type pairs, collect them using a separate WITH statement 
 
 For example:
 
@@ -869,18 +869,13 @@ Example “What NIACs are taking place in Europe or Asia regions?” or “Are t
 
 ```
 
-// Example Query: "What NIACs are taking place in Europe or Asia regions?"
-
-
-// Step 0: Define target region codes into one variable and conflict-type filters
+// Define target region codes into one variable and conflict-type filters
 WITH ["150", "142"] AS target_region_UN_M49_codes, 
      ["Non-International Armed Conflict (NIAC)"] AS target_conflict_types
      // or [] for all conflict types
 
 
-
-// Step A: Collect region data first (so we always have region_name)
-
+// Collect region data first (so we always have region_name)
 MATCH (gr:GeoRegion)
 WHERE gr.UN_M49Code IN target_region_UN_M49_codes
 WITH target_conflict_types, target_region_UN_M49_codes,
@@ -890,18 +885,14 @@ WITH target_conflict_types, target_region_UN_M49_codes,
      }}) AS region_dictionary
 
 
-
-// Step B: Retrieve countries in those target regions
-
+//  Retrieve countries in those target regions
 MATCH (gr:GeoRegion)<-[:BELONGS_TO]-(co:Country)
 WHERE gr.UN_M49Code IN target_region_UN_M49_codes
 WITH co, gr.UN_M49Code AS region_code, gr.name AS region_name,
      target_region_UN_M49_codes, target_conflict_types, region_dictionary
 
 
-
-// Step C: Match conflicts in those countries, along with classification & actors
-
+// Match conflicts in those countries, along with classification & actors
 OPTIONAL MATCH (co)<-[:IS_TAKING_PLACE_IN_COUNTRY]-(c:Conflict)
 OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
 OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(actor)
@@ -910,8 +901,7 @@ WITH co, region_code, region_name, c, ct, actor,
 
 
 
-// Step D: Filter conflicts by desired conflict types (always apply even if no filter)
-
+// Filter conflicts by desired conflict types (always apply even if no filter)
 WITH co, region_code, region_name, target_region_UN_M49_codes, target_conflict_types, region_dictionary,
      [conflict IN COLLECT(DISTINCT c)
        WHERE conflict IS NOT NULL
@@ -934,8 +924,7 @@ WITH co, region_code, region_name, target_region_UN_M49_codes, target_conflict_t
 
 
 
-// Step E: Build per-country conflict data
-
+//  Build per-country conflict data
 WITH target_region_UN_M49_codes, target_conflict_types, region_dictionary,
      COLLECT({{
        country_name:   co.name,
@@ -950,8 +939,7 @@ WITH target_region_UN_M49_codes, target_conflict_types, region_dictionary,
 
 
 
-// Step F: Build region_conflicts, using ONLY the official region name
-
+// Build region_conflicts, using ONLY the official region name
 WITH country_conflict_data, target_conflict_types, region_dictionary, target_region_UN_M49_codes,
      [region IN target_region_UN_M49_codes |
        {{
@@ -967,10 +955,7 @@ WITH country_conflict_data, target_conflict_types, region_dictionary, target_reg
      ] AS region_conflicts
 
 
-
-
-// Step G: Count unique conflicts per region
-
+// Count unique conflicts per region
 WITH country_conflict_data, target_conflict_types,
      [r IN region_conflicts |
        {{
@@ -980,8 +965,7 @@ WITH country_conflict_data, target_conflict_types,
      ] AS region_conflict_counts
 
 
-
-// Step H: Determine which region has the most conflicts (if > 1 region)
+// Determine which region has the most conflicts (if > 1 region)
 
 UNWIND region_conflict_counts AS r
 WITH country_conflict_data, target_conflict_types, region_conflict_counts,
@@ -1007,8 +991,7 @@ WITH country_conflict_data, target_conflict_types, region_conflict_counts,
      END AS dominant_region_summary
 
 
-
-// Step I: Construct breakdown text by country
+// Construct breakdown text by country
 
 WITH country_conflict_data, region_conflict_counts, dominant_region_summary, target_conflict_types,
      apoc.text.join(
@@ -1439,4 +1422,4 @@ WITH [] AS target_country_UN_M49_codes, //  target all countries in the world
 Remember, your task is to return a single cypher query for the user research question. Note: Do not include any explanations or apologies in your responses.
 Do not respond to any questions that might ask anything else than for you to construct a Cypher statement.
 Do not include any text except the generated Cypher statement.
- Do not include the word "cypher". Do not use code backticks like ```
+ Do not include the word "cypher". Do not use code backticks
