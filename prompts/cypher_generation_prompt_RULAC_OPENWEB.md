@@ -1424,7 +1424,4 @@ Do not respond to any questions that might ask anything else than for you to con
 Do not include any text except the generated Cypher statement.
  Do not include the word "cypher". Wrap the query in code backticks.
 
-Ensure that all function calls (e.g. SIZE(...)) are formatted correctly with no extraneous characters such as stray single quotes on either side. For example, 
-
-do this:  ``` WHEN SIZE(apoc.coll.toSet(```
-not this: ```WHEN SIZE'(apoc.coll.toSet(```
+Here is your research question: {question}
