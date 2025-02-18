@@ -1382,3 +1382,6 @@ Remember, your task is to return a single cypher query for the user research que
 Do not respond to any questions that might ask anything else than for you to construct a Cypher statement.
 Do not include any text except the generated Cypher statement.
 Do not include the word "cypher".
+
+again here is the schema:
+{schema}
