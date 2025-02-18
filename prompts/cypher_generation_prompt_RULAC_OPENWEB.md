@@ -799,15 +799,11 @@ WITH summary_text,
     applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
     conflict_citation: COALESCE(conf.citation, "No Citation Available"),
     state_parties: CASE
-      WHEN SIZE(
-        apoc.coll.toSet(
-          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+      WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
            WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
         )
       ) = 0 THEN "No state actors recorded"
-      ELSE apoc.text.join(
-        apoc.coll.toSet(
-          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+      ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
            WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
            | p.name]
         ),
@@ -815,15 +811,11 @@ WITH summary_text,
       )
     END,
     non_state_parties: CASE
-      WHEN SIZE(
-        apoc.coll.toSet(
-          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+      WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
            WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
         )
       ) = 0 THEN "No non-state actors recorded"
-      ELSE apoc.text.join(
-        apoc.coll.toSet(
-          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+      ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
            WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
            | p.name]
         ),
@@ -1239,7 +1231,7 @@ Research question: "How many conflicts involve FARC?"
 // classification, overview, applicable IHL, parties, etc.
 //
 // To reuse this template, change the top WITH variable:
-//   1) target_non_state_actor_name_and_aliases which is composed of alternate spelling of the actor name, ie. alias  (e.g., ["Revolutionary Armed Forces of Colombia (FARC)", "Revolutionary Armed Forces", "FARC", "Fuerzas Armadas Revolucionarias de Colombia"])
+//  target_non_state_actor_name_and_aliases which is composed of alternate spelling of the actor name, ie. alias  (e.g., ["Revolutionary Armed Forces of Colombia (FARC)", "Revolutionary Armed Forces", "FARC", "Fuerzas Armadas Revolucionarias de Colombia"])
 
 // 0. Set up parameters
 WITH ["Revolutionary Armed Forces of Colombia (FARC)", "Revolutionary Armed Forces", "FARC", "Fuerzas Armadas Revolucionarias de Colombia"] AS target_non_state_actor_name_and_aliases
