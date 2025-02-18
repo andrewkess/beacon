@@ -615,10 +615,46 @@ WITH CASE
 
 // Prepare detailed conflict information. For every distinct conflict in the global set,
 // we build a map of its details—using fallback values when necessary.
-
-WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_conflicts | {{conflict_name: COALESCE(conf.name, "Unknown"), conflict_classification: COALESCE([item IN apoc.coll.flatten([d IN state_conflict_data | d.conflict_types]) WHERE item.conflict = conf | item.type][0], "Unclassified"), conflict_overview: COALESCE(conf.overview, "No Overview Available"), applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"), conflict_citation: COALESCE(conf.citation, "No Citation Available"), state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]) ) = 0 THEN "No state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END, non_state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]) ) = 0 THEN "No non-state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END }} ] AS conflict_details
-
-
+WITH summary_text, global_conflicts, state_conflict_data,
+  [conf IN global_conflicts | {{
+    conflict_name: COALESCE(conf.name, "Unknown"),
+    conflict_classification: COALESCE(
+      [item IN apoc.coll.flatten([d IN state_conflict_data | d.conflict_types])
+       WHERE item.conflict = conf | item.type][0],
+      "Unclassified"
+    ),
+    conflict_overview: COALESCE(conf.overview, "No Overview Available"),
+    applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
+    conflict_citation: COALESCE(conf.citation, "No Citation Available"),
+    state_parties: CASE
+      WHEN SIZE(apoc.coll.toSet(
+        [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
+         WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
+      )) = 0 THEN "No state actors recorded"
+      ELSE apoc.text.join(
+        apoc.coll.toSet(
+          [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
+           WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
+           | p.name]
+        ),
+        ", "
+      )
+    END,
+    non_state_parties: CASE
+      WHEN SIZE(apoc.coll.toSet(
+        [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
+         WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
+      )) = 0 THEN "No non-state actors recorded"
+      ELSE apoc.text.join(
+        apoc.coll.toSet(
+          [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
+           WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
+           | p.name]
+        ),
+        ", "
+      )
+    END
+  }}] AS conflict_details
 
 // Return the final structured result
 RETURN {{
@@ -757,53 +793,58 @@ WITH CASE
 
 
 // Prepare detailed conflict information for each distinct conflict.
-WITH summary_text, [conf IN global_conflicts | {{
-    conflict_name:           COALESCE(conf.name, "Unknown"),
+WITH summary_text, 
+  [conf IN global_conflicts | {{
+    conflict_name: COALESCE(conf.name, "Unknown"),
     conflict_classification: COALESCE(
-       [item IN apoc.coll.flatten([d IN country_conflict_data | d.conflict_types])
-         WHERE item.conflict = conf | item.type][0],
-       "Unclassified"
+      [item IN apoc.coll.flatten([d IN country_conflict_data | d.conflict_types])
+       WHERE item.conflict = conf | item.type][0],
+      "Unclassified"
     ),
-    conflict_overview:       COALESCE(conf.overview, "No Overview Available"),
-    applicable_ihl_law:      COALESCE(conf.applicable_law, "Not Specified"),
-    conflict_citation:       COALESCE(conf.citation, "No Citation Available"),
-    state_parties:           CASE 
-                               WHEN SIZE(apoc.coll.toSet(
-                                     [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
-                                      WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
-                                   )) = 0 
-                               THEN "No state actors recorded" 
-                               ELSE apoc.text.join(
-                                     apoc.coll.toSet(
-                                       [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
-                                        WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-                                        | p.name]
-                                     ),
-                                     ", "
-                                   )
-                             END,
-    non_state_parties:       CASE 
-                               WHEN SIZE(apoc.coll.toSet(
-                                     [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
-                                      WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
-                                   )) = 0 
-                               THEN "No non-state actors recorded" 
-                               ELSE apoc.text.join(
-                                     apoc.coll.toSet(
-                                       [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
-                                        WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-                                        | p.name]
-                                     ),
-                                     ", "
-                                   )
-                             END
-}}] AS conflict_details
+    conflict_overview: COALESCE(conf.overview, "No Overview Available"),
+    applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
+    conflict_citation: COALESCE(conf.citation, "No Citation Available"),
+    state_parties: CASE
+      WHEN SIZE(
+        apoc.coll.toSet(
+          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+           WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
+        )
+      ) = 0 THEN "No state actors recorded"
+      ELSE apoc.text.join(
+        apoc.coll.toSet(
+          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+           WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
+           | p.name]
+        ),
+        ", "
+      )
+    END,
+    non_state_parties: CASE
+      WHEN SIZE(
+        apoc.coll.toSet(
+          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+           WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
+        )
+      ) = 0 THEN "No non-state actors recorded"
+      ELSE apoc.text.join(
+        apoc.coll.toSet(
+          [p IN apoc.coll.flatten([d IN country_conflict_data | d.all_actors])
+           WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
+           | p.name]
+        ),
+        ", "
+      )
+    END
+  }}] AS conflict_details
+
 
 // Return final structured result
 RETURN {{
   summary: summary_text,
   conflict_details: conflict_details
-}} AS RULAC_research```
+}} AS RULAC_research
+```
 
 
 
