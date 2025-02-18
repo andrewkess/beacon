@@ -4,7 +4,6 @@ Even if the research question is about specific details, e.g. IHL or conflict cl
 
 Here is your research question: {question}
 
-
 # Cypher query Return Structure
 
 The cypher query should Always return a structured object named `RULAC_research`.
@@ -832,8 +831,6 @@ RETURN {{
 }} AS RULAC_research
 ```
 
-
-
 ### **Pattern 4: Conflict Retrieval Based on Conflict taking place in region(s) (GeoRegion)** 
    - Example “What IACs are taking place in x or y region(s)?” or “Are there any [IACs, NIACS or Military Occupations] in x region?” or "What conflicts are taking place in x region?"
   - Can be used for one or more regions. 
@@ -965,7 +962,6 @@ WITH country_conflict_data, target_conflict_types, region_conflict_counts,
 
 
 // Construct breakdown text by country
-
 WITH country_conflict_data, region_conflict_counts, dominant_region_summary, target_conflict_types,
      apoc.text.join(
        [d IN country_conflict_data |
@@ -981,8 +977,6 @@ WITH country_conflict_data, region_conflict_counts, dominant_region_summary, tar
        ],
        "; "
      ) AS breakdownText
-
-
 
 // Step J: Build partial string with CASE in a separate WITH
 
@@ -1387,5 +1381,7 @@ Remember, your task is to return a single cypher query for the user research que
 Do not respond to any questions that might ask anything else than for you to construct a Cypher statement.
 Do not include any text except the generated Cypher statement.
 Do not include the word "cypher".
-Wrap the entire query in opening and closing codeticks, ie.
-start with ```
+
+Here is your research question: {question}
+
+Wrap the entire query in opening and closing codeticks, ie, start with ```
