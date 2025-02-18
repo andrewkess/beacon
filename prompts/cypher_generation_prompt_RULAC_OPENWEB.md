@@ -28,13 +28,15 @@ Inside this object, include:
 
 For example:
 
-```OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(actor)
+```
+OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(actor)
 OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
 
 WITH COALESCE(sa.name, target_state_actor_name) AS actor_name,
      COLLECT(DISTINCT c) AS conflicts,
      COLLECT(DISTINCT actor) AS all_actors,
-     COLLECT(DISTINCT {{ conflict: c, type: ct.type }}) AS conflict_types```
+     COLLECT(DISTINCT {{ conflict: c, type: ct.type }}) AS conflict_types
+```
 
 
 4. Avoid directly matching conflicts by state actor `name` or country `name`. Instead, match conflicts using the `UN_M49Code` which is the United Nations M49 country code of the relevant country or state actor.
@@ -45,9 +47,11 @@ WITH COALESCE(sa.name, target_state_actor_name) AS actor_name,
 8. Pass down all variables in each WITH scope if you need the data in clauses, for example `target_country_UN_M49_codes`
 9. If the research question asks about global information, i.e. for conflicts worldwide, use pattern 8 to match countries directly instead of by region
 10. If the research question mentions any of these political or economic organizations: "European Union", "African Union", "G7", "BRICS", "NATO", "ASEAN" then use pattern 6a or 6b where `target_organization_name` is set and `target_country_UN_M49_codes` and `target_state_actor_UN_M49_codes` are left as blank lists, []. For example, with a question like: "What conflicts are taking place in countries from the African Union organization?", you would start with 
-```WITH ["African Union"] AS target_organization_name, // "African Union" was mentioned as an organization in the question
+```
+WITH ["African Union"] AS target_organization_name, // "African Union" was mentioned as an organization in the question
      [] AS target_country_UN_M49_codes, // always a blank list when searching by organization
-     [] AS target_conflict_types  // also kept blank to search across all conflict types```
+     [] AS target_conflict_types  // also kept blank to search across all conflict types
+```
 
 # Neojs Schema
 
@@ -504,7 +508,8 @@ It can also be used for comparison counts between state actors, e.g. "Which stat
 Example Research Question: What IACs and Military occupations is France or Russia involved in as a state actor?
 
 
-```// Define the target state actor(s) and optional conflict type(s)
+```
+// Define the target state actor(s) and optional conflict type(s)
 WITH ["250", "643"] AS target_state_actor_UN_M49_codes, 
      ["International Armed Conflict (IAC)", "Military Occupation"] AS target_conflict_types
 
@@ -610,48 +615,10 @@ WITH CASE
 
 // Prepare detailed conflict information. For every distinct conflict in the global set,
 // we build a map of its details—using fallback values when necessary.
-WITH summary_text, global_conflicts, state_conflict_data,
-     [conf IN global_conflicts | {{
-         conflict_name: COALESCE(conf.name, "Unknown"),
-         conflict_classification: COALESCE(
-           [item IN apoc.coll.flatten([d IN state_conflict_data | d.conflict_types])
-            WHERE item.conflict = conf | item.type][0],
-           "Unclassified"
-         ),
-         conflict_overview: COALESCE(conf.overview, "No Overview Available"),
-         applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
-         conflict_citation: COALESCE(conf.citation, "No Citation Available"),
-         state_parties: CASE 
-                          WHEN SIZE(apoc.coll.toSet(
-                                 [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
-                                  WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
-                               )) = 0 
-                          THEN "No state actors recorded" 
-                          ELSE apoc.text.join(
-                                 apoc.coll.toSet(
-                                   [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
-                                    WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-                                    | p.name]
-                                 ),
-                                 ", "
-                               )
-                        END,
-         non_state_parties: CASE 
-                              WHEN SIZE(apoc.coll.toSet(
-                                     [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
-                                      WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]
-                                   )) = 0 
-                              THEN "No non-state actors recorded" 
-                              ELSE apoc.text.join(
-                                     apoc.coll.toSet(
-                                       [p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
-                                       WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-                                        | p.name]
-                                     ),
-                                     ", "
-                                   )
-                            END
-     }}] AS conflict_details
+
+WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_conflicts | { conflict_name: COALESCE(conf.name, "Unknown"), conflict_classification: COALESCE([item IN apoc.coll.flatten([d IN state_conflict_data | d.conflict_types]) WHERE item.conflict = conf | item.type][0], "Unclassified"), conflict_overview: COALESCE(conf.overview, "No Overview Available"), applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"), conflict_citation: COALESCE(conf.citation, "No Citation Available"), state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]) ) = 0 THEN "No state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END, non_state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)]) ) = 0 THEN "No non-state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END } ] AS conflict_details
+
+
 
 // Return the final structured result
 RETURN {{
@@ -1383,5 +1350,4 @@ Do not respond to any questions that might ask anything else than for you to con
 Do not include any text except the generated Cypher statement.
 Do not include the word "cypher".
 
-again here is the schema:
-{schema} """
+"""
