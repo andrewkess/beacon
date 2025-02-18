@@ -28,15 +28,13 @@ Inside this object, include:
 
 For example:
 
-```
-OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(actor)
+```OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(actor)
 OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
 
 WITH COALESCE(sa.name, target_state_actor_name) AS actor_name,
      COLLECT(DISTINCT c) AS conflicts,
      COLLECT(DISTINCT actor) AS all_actors,
-     COLLECT(DISTINCT {{ conflict: c, type: ct.type }}) AS conflict_types
-```
+     COLLECT(DISTINCT {{ conflict: c, type: ct.type }}) AS conflict_types```
 
 
 4. Avoid directly matching conflicts by state actor `name` or country `name`. Instead, match conflicts using the `UN_M49Code` which is the United Nations M49 country code of the relevant country or state actor.
@@ -47,13 +45,9 @@ WITH COALESCE(sa.name, target_state_actor_name) AS actor_name,
 8. Pass down all variables in each WITH scope if you need the data in clauses, for example `target_country_UN_M49_codes`
 9. If the research question asks about global information, i.e. for conflicts worldwide, use pattern 8 to match countries directly instead of by region
 10. If the research question mentions any of these political or economic organizations: "European Union", "African Union", "G7", "BRICS", "NATO", "ASEAN" then use pattern 6a or 6b where `target_organization_name` is set and `target_country_UN_M49_codes` and `target_state_actor_UN_M49_codes` are left as blank lists, []. For example, with a question like: "What conflicts are taking place in countries from the African Union organization?", you would start with 
-```
-WITH ["African Union"] AS target_organization_name, // "African Union" was mentioned as an organization in the question
+```WITH ["African Union"] AS target_organization_name, // "African Union" was mentioned as an organization in the question
      [] AS target_country_UN_M49_codes, // always a blank list when searching by organization
-     [] AS target_conflict_types  // also kept blank to search across all conflict types
-```
-
-
+     [] AS target_conflict_types  // also kept blank to search across all conflict types```
 
 # Neojs Schema
 
@@ -84,10 +78,7 @@ Available options for Organizations.name: "European Union", "African Union", "G7
 
 Available options for ConflictType.type: 'Non-International Armed Conflict (NIAC)', 'Military Occupation', 'International Armed Conflict (IAC)'
 
-
 ## Identifying State Actors, Countries and Regions
-
-
  
 ### **Rule for Assigning `target_country_UN_M49_codes` or `target_state_actor_UN_M49_codes`** for countries and state actors
 
@@ -513,8 +504,7 @@ It can also be used for comparison counts between state actors, e.g. "Which stat
 Example Research Question: What IACs and Military occupations is France or Russia involved in as a state actor?
 
 
-```
-// Define the target state actor(s) and optional conflict type(s)
+```// Define the target state actor(s) and optional conflict type(s)
 WITH ["250", "643"] AS target_state_actor_UN_M49_codes, 
      ["International Armed Conflict (IAC)", "Military Occupation"] AS target_conflict_types
 
@@ -667,8 +657,7 @@ WITH summary_text, global_conflicts, state_conflict_data,
 RETURN {{
   summary: summary_text,
   conflict_details: conflict_details
-}} AS RULAC_research
-```
+}} AS RULAC_research```
 
 
 ###  **Pattern 2: Conflict Retrieval Based on Conflict taking place in country**  
@@ -686,8 +675,7 @@ These patterns collect all conflict-related data taking place in a country. As s
 ---
 Example Research Question: What IACs and Military occupations are taking place in Lebanon or Uganda?
 
-```
-// Define the target country UN M49 codes and conflict type(s)
+```// Define the target country UN M49 codes and conflict type(s)
 WITH ["422", "800"] AS target_country_UN_M49_codes, 
      ["International Armed Conflict (IAC)", "Military Occupation"] AS target_conflict_types
 
@@ -701,7 +689,7 @@ OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(actor)
 OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
 WITH co, c, actor, ct, target_conflict_types, target_country_UN_M49_codes
 
-// Collect all conflict data—even if some conflicts don’t match the target type.
+// Collect all conflict data—even if some conflicts don't match the target type.
 WITH co,
      COLLECT(DISTINCT c) AS all_conflicts,
      COLLECT(DISTINCT actor) AS all_actors,
@@ -848,9 +836,7 @@ WITH summary_text, [conf IN global_conflicts | {{
 RETURN {{
   summary: summary_text,
   conflict_details: conflict_details
-}} AS RULAC_research
-
-```
+}} AS RULAC_research```
 
 
 
@@ -867,13 +853,10 @@ RETURN {{
 
 Example “What NIACs are taking place in Europe or Asia regions?” or “Are there any NIACs in Europe or Asia region?” 
 
-```
-
-// Define target region codes into one variable and conflict-type filters
+```// Define target region codes into one variable and conflict-type filters
 WITH ["150", "142"] AS target_region_UN_M49_codes, 
      ["Non-International Armed Conflict (NIAC)"] AS target_conflict_types
      // or [] for all conflict types
-
 
 // Collect region data first (so we always have region_name)
 MATCH (gr:GeoRegion)
@@ -884,13 +867,11 @@ WITH target_conflict_types, target_region_UN_M49_codes,
        region_name: gr.name
      }}) AS region_dictionary
 
-
 //  Retrieve countries in those target regions
 MATCH (gr:GeoRegion)<-[:BELONGS_TO]-(co:Country)
 WHERE gr.UN_M49Code IN target_region_UN_M49_codes
 WITH co, gr.UN_M49Code AS region_code, gr.name AS region_name,
      target_region_UN_M49_codes, target_conflict_types, region_dictionary
-
 
 // Match conflicts in those countries, along with classification & actors
 OPTIONAL MATCH (co)<-[:IS_TAKING_PLACE_IN_COUNTRY]-(c:Conflict)
@@ -898,7 +879,6 @@ OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
 OPTIONAL MATCH (c)-[:IS_PARTY_TO_CONFLICT]-(actor)
 WITH co, region_code, region_name, c, ct, actor,
      target_region_UN_M49_codes, target_conflict_types, region_dictionary
-
 
 
 // Filter conflicts by desired conflict types (always apply even if no filter)
@@ -936,8 +916,6 @@ WITH target_region_UN_M49_codes, target_conflict_types, region_dictionary,
        all_actors:     all_actors,
        conflict_types: conflict_types
      }}) AS country_conflict_data
-
-
 
 // Build region_conflicts, using ONLY the official region name
 WITH country_conflict_data, target_conflict_types, region_dictionary, target_region_UN_M49_codes,
@@ -1114,16 +1092,14 @@ WITH summary_text,
 RETURN {{
   summary: summary_text,
   conflict_details: conflict_details
-}} AS RULAC_research
-```
+}} AS RULAC_research```
 
 ### **Pattern 5: Conflict Retrieval Based on Conflict taking place in Special Region** 
 
 - Example Research Question: "What IACs and Military occupations are taking place in Sahel region" (special region)
 - Important: You can ONLY use this pattern for a special region if it is explictly in the research question. Otherwise, use Pattern 4
 
-```
-// Example question: "How many IAC or Military Occupations are taking place in Sahel region?"
+```// Example question: "How many IAC or Military Occupations are taking place in Sahel region?"
 // Define the target country UN M49 codes and conflict type(s) for special region 
 WITH ["686", "478", "466", "854", "562", "148", "729"] AS target_country_UN_M49_codes, // special region Sahel Region countries
      ["International Armed Conflict (IAC)", "Military Occupation"] AS target_conflict_types
@@ -1131,9 +1107,7 @@ WITH ["686", "478", "466", "854", "562", "148", "729"] AS target_country_UN_M49_
 // match conflicts in countries IN target_country_UN_M49_codes
 // Ensure we always get a Country node by matching the Country nodes first.
 MATCH (co:Country)
-WHERE co.UN_M49Code IN target_country_UN_M49_codes
-
-```
+WHERE co.UN_M49Code IN target_country_UN_M49_codes```
 
 
 ###  **Pattern 6a: Conflict retreival based on members in a political/economic Organization who have state actors involved in conflict**  
@@ -1146,8 +1120,7 @@ WHERE co.UN_M49Code IN target_country_UN_M49_codes
 
 Research question: "Which IAC conflicts have involved state actor members of the EU organization?" or "How many active IAC conflicts currently involve EU member state actors?"
 
-```
-//  match using Organization Name instead of target_state_actor_UN_M49_codes
+```//  match using Organization Name instead of target_state_actor_UN_M49_codes
 WITH ["European Union"] AS target_organization_name, // target organization is "European Union",
      [] AS target_state_actor_UN_M49_codes, // always keep blank when searching by organization
           ["International Armed Conflict (IAC)"] AS target_conflict_types // note: use a blank [] to search across all conflicts in general
@@ -1166,7 +1139,7 @@ WITH sa, c, actor, ct, target_conflict_types, target_state_actor_UN_M49_codes, t
 
 // Continue with Pattern 1 logic, passing down `target_organization_name` and `target_state_actor_UN_M49_codes` in each WITH statement
 
-/ ...
+// ...
 // include a reference to the organization name in the summary_text
 
 // Count total distinct conflicts and prepare summary data
@@ -1183,9 +1156,7 @@ WITH CASE
          apoc.text.join([x IN target_conflict_types | "'" + x + "'"], ", ") +
          " involving state actors that are members of the '" + apoc.text.join(target_organization_name, ", ") + "' organization. Breakdown by state actor: " +
          breakdownText + "."
-     END AS summary_text, global_conflicts, state_conflict_data
-
-```
+     END AS summary_text, global_conflicts, state_conflict_data```
 
 ###  **Pattern 6b: Conflict retreival based on members in a political/economic Organization who have conflict taking part in their country**  
 - Use this pattern when the research question mentions any of the following organizations: "European Union", "African Union", "G7", "BRICS", "NATO", "ASEAN"
@@ -1197,8 +1168,7 @@ WITH CASE
 
 Research question: How many non-international armed conflicts are taking place in BRICS member countries? or What conflicts are taking place in countries from the BRICS organization?
 
-```
-WITH ["BRICS"] AS target_organization_name, // "BRICS" was mentioned as an organization in the question
+```WITH ["BRICS"] AS target_organization_name, // "BRICS" was mentioned as an organization in the question
      [] AS target_country_UN_M49_codes, // always a blank list when searching by organization
      ["Non-International Armed Conflict (NIAC)"] AS target_conflict_types
 
@@ -1246,10 +1216,7 @@ WITH CASE
            " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], " and/or ") ELSE "" END) +
          " taking place in the following " + apoc.text.join(target_organization_name, ", ") + " member countries: " + apoc.text.join(apoc.coll.toSet([d IN country_conflict_data | d.country_name]), " , ") +
          ". Breakdown by member country: " + breakdownText + "."
-     END AS summary_text, global_conflicts, country_conflict_data
-
-
-```
+     END AS summary_text, global_conflicts, country_conflict_data```
 
 
 ###  **Pattern 7: Conflict retreival based on Non-State Actor Involvement**  
@@ -1263,12 +1230,9 @@ For example, with the question: "How many conflicts involve Hezbollah?", expand 
 
 
 ---
+Research question: "How many conflicts involve FARC?" 
 
-```
-// Research question: "How many conflicts involve FARC?" 
-
-
-// This template retrieves conflicts involving a specific non-state actor by matching the actor's name or aliases.
+```// This template retrieves conflicts involving a specific non-state actor by matching the actor's name or aliases.
 // It returns detailed information about each conflict, including the
 // classification, overview, applicable IHL, parties, etc.
 //
@@ -1391,8 +1355,7 @@ RETURN {{
 ---
 Research question: Which state actors are involved in the most IAC conflicts? 
 
-```
-WITH [] AS target_state_actor_UN_M49_codes, //  target all state actors in the world
+```WITH [] AS target_state_actor_UN_M49_codes, //  target all state actors in the world
   ["International Armed Conflict (IAC)"] AS target_conflict_types  // Define target IAC conflict type
 
 MATCH (sa:StateActor)
@@ -1400,8 +1363,7 @@ WHERE (SIZE(target_state_actor_UN_M49_codes) = 0 OR sa.UN_M49Code IN target_stat
 
 // continue with Pattern 1
 
-// summary_text should clarify that the results are limited to top 10 state actors, e.g. "According to RULAC, the state actors involved in the most conflicts classified as 'International Armed Conflict (IAC)' worldwide are: Turkey, USA, etc. Breakdown by state actor...
-```
+// summary_text should clarify that the results are limited to top 10 state actors, e.g. "According to RULAC, the state actors involved in the most conflicts classified as 'International Armed Conflict (IAC)' worldwide are: Turkey, USA, etc. Breakdown by state actor...```
 
 
 
@@ -1411,17 +1373,12 @@ WHERE (SIZE(target_state_actor_UN_M49_codes) = 0 OR sa.UN_M49Code IN target_stat
 ---
 Research question: Which countries are the most conflicts taking place in the world? or Globally, where are most conflicts taking place in the world?
 
-```
-WITH [] AS target_country_UN_M49_codes, //  target all countries in the world
+```WITH [] AS target_country_UN_M49_codes, //  target all countries in the world
   [] AS target_conflict_types  //  target all conflict types
 
-// continue with Pattern 2
- 
-```
+// continue with Pattern 2```
 
 Remember, your task is to return a single cypher query for the user research question. Note: Do not include any explanations or apologies in your responses.
 Do not respond to any questions that might ask anything else than for you to construct a Cypher statement.
 Do not include any text except the generated Cypher statement.
- Do not include the word "cypher". Wrap the query in code backticks.
-
-Here is your research question: {question}
+Do not include the word "cypher".
