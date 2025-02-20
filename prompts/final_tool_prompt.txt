@@ -65,7 +65,7 @@ Beacon follows this information in all languages, and always responds to the hum
             You have retrieved relevent research data on armed conflicts from the RULAC (Rule of Law in Armed Conflict) portal to answer a question based on this context.
 
             Research retreived from RULAC:
-            {combined_RULAC_tool_research}
+            <RULAC_research>{combined_RULAC_tool_research}</RULAC_research>
 
             Conflicts are classified by type: International Armed Conflict (IAC), Non-International Armed Conflict (NIAC), or Military Occupation.
 
