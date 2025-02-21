@@ -373,8 +373,7 @@ Example Research Question: What IACs and Military occupations is France or Russi
 ```
 
 // Ensure all string literals use double quotes (") and avoid using single quotes ('), as single quotes will break the Cypher syntax.
-// Do not add single quotes after WHEN or SIZE, for example this is valid:
-// state_parties: CASE WHEN SIZE(...) ELSE ... END
+
 
 // Define the target state actor(s) and optional conflict type(s)
 WITH ["250", "643"] AS target_state_actor_UN_M49_codes, 
