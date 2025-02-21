@@ -463,13 +463,13 @@ WITH CASE
        WHEN total_distinct_conflicts = 0 THEN
          "According to RULAC, there are currently no recorded armed conflicts" +
          (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
-           " classified as " + apoc.text.join([x IN target_conflict_types | "`" + x + "`"], ", ") ELSE "" END) +
+           " classified as " + apoc.text.join([x IN target_conflict_types | x ], ", ") ELSE "" END) +
          " involving the following state actors: " + apoc.text.join(apoc.coll.toSet([d IN state_conflict_data | d.state_actor_name]), ", ") + "."
        ELSE
          "According to RULAC, there are currently " + toString(total_distinct_conflicts) +
          " total distinct armed conflict(s)" +
          (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
-           " classified as " + apoc.text.join([x IN target_conflict_types | "`" + x + "`"], " and/or ") ELSE "" END) +
+           " classified as " + apoc.text.join([x IN target_conflict_types | x ], " and/or ") ELSE "" END) +
          " involving the following state actors: " + apoc.text.join(apoc.coll.toSet([d IN state_conflict_data WHERE d.conflict_count > 0 | d.state_actor_name]), ", ") +
          ". Breakdown by state actor: " + breakdownText + "."
      END AS summary_text, global_conflicts, state_conflict_data
