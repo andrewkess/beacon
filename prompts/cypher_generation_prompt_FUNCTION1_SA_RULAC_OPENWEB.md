@@ -463,13 +463,13 @@ WITH CASE
        WHEN total_distinct_conflicts = 0 THEN
          "According to RULAC, there are currently no recorded armed conflicts" +
          (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
-           " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], ", ") ELSE "" END) +
+           " classified as " + apoc.text.join([x IN target_conflict_types | "`" + x + "`"], ", ") ELSE "" END) +
          " involving the following state actors: " + apoc.text.join(apoc.coll.toSet([d IN state_conflict_data | d.state_actor_name]), ", ") + "."
        ELSE
          "According to RULAC, there are currently " + toString(total_distinct_conflicts) +
          " total distinct armed conflict(s)" +
          (CASE WHEN target_conflict_types IS NOT NULL AND SIZE(target_conflict_types) > 0 THEN
-           " classified as " + apoc.text.join([x IN target_conflict_types | "'" + x + "'"], " and/or ") ELSE "" END) +
+           " classified as " + apoc.text.join([x IN target_conflict_types | "`" + x + "`"], " and/or ") ELSE "" END) +
          " involving the following state actors: " + apoc.text.join(apoc.coll.toSet([d IN state_conflict_data WHERE d.conflict_count > 0 | d.state_actor_name]), ", ") +
          ". Breakdown by state actor: " + breakdownText + "."
      END AS summary_text, global_conflicts, state_conflict_data
@@ -537,6 +537,8 @@ Remember, your task is to return a single cypher query for the user research que
 Do not respond to any questions that might ask anything else than for you to construct a Cypher statement.
 Do not include any text except the generated Cypher statement.
 Do not include the word "cypher".
+
+When generating the Cypher query, use only double quotes (") for all string literals and avoid using single quotes (') altogether.
 
 Here is your research question: {question}
 
