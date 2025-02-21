@@ -476,7 +476,8 @@ WITH CASE
 
 // Prepare detailed conflict information. For every distinct conflict in the global set,
 // we build a map of its details—using fallback values when necessary.
-WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_conflicts | {{
+WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_conflicts | 
+{{
   conflict_name: COALESCE(conf.name, "Unknown"),
   conflict_classification: COALESCE([item IN apoc.coll.flatten([d IN state_conflict_data | d.conflict_types]) WHERE item.conflict = conf | item.type][0], "Unclassified"),
   conflict_overview: COALESCE(conf.overview, "No Overview Available"),
@@ -484,7 +485,8 @@ WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_confli
   conflict_citation: COALESCE(conf.citation, "No Citation Available"),
   state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 THEN "No state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END,
   non_state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 THEN "No non-state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END
-}}] AS conflict_details
+}}
+] AS conflict_details
 RETURN {{
   summary: summary_text,
   conflict_details: conflict_details
@@ -497,7 +499,7 @@ Do not respond to any questions that might ask anything else than for you to con
 Do not include any text except the generated Cypher statement.
 Do not include the word "cypher".
 
-When generating the Cypher query, use only double quotes (") for all string literals and avoid using single quotes (') altogether.
+When generating the Cypher query, use only double quotes (") for all string literals and avoid using single quotes altogether.
 
 Here is your research question: {question}
 
