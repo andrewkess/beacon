@@ -489,25 +489,16 @@ WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_confli
   conflict_overview: COALESCE(conf.overview, "No Overview Available"),
   applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
   conflict_citation: COALESCE(conf.citation, "No Citation Available"),
-
-  // Build state parties list, ensure no single quotes around CASE or SIZE
-  state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 
-    THEN "No state actors recorded" 
-    ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") 
-  END,
-
-  // Build non-state parties list, ensure no single quotes around CASE or SIZE
-  non_state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 
-    THEN "No non-state actors recorded" 
-    ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") 
-  END
+  state_parties: apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", "),
+  non_state_parties: apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ")
 }}] AS conflict_details
 
-// Return the final structured result
 RETURN {{
   summary: summary_text,
   conflict_details: conflict_details
 }} AS RULAC_research
+
+
 ```
 
 
