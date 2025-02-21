@@ -479,7 +479,7 @@ WITH CASE
 WITH summary_text, 
      global_conflicts, 
      state_conflict_data,
-     [conf IN global_conflicts | {{
+     [conf IN global_conflicts | {
        conflict_name: COALESCE(conf.name, "Unknown"),
        conflict_classification: COALESCE(
          [item IN apoc.coll.flatten([d IN state_conflict_data | d.conflict_types])
@@ -490,47 +490,40 @@ WITH summary_text,
        applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
        conflict_citation: COALESCE(conf.citation, "No Citation Available"),
        state_parties: CASE
-         WHEN 
-           SIZE(apoc.coll.toSet([
+         WHEN SIZE(apoc.coll.toSet([
+           p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
+           WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
+         ])) = 0 THEN "No state actors recorded"
+         ELSE apoc.text.join(
+           apoc.coll.toSet([
              p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
              WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-           ])) = 0 THEN 
-             "No state actors recorded"
-         ELSE 
-           apoc.text.join(
-             apoc.coll.toSet([
-               p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
-               WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-               | p.name
-             ]), 
-             ", "
-           )
+             | p.name
+           ]), 
+           ", "
+         )
        END,
        non_state_parties: CASE
-         WHEN 
-           SIZE(apoc.coll.toSet([
+         WHEN SIZE(apoc.coll.toSet([
+           p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
+           WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
+         ])) = 0 THEN "No non-state actors recorded"
+         ELSE apoc.text.join(
+           apoc.coll.toSet([
              p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
              WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-           ])) = 0 THEN 
-             "No non-state actors recorded"
-         ELSE 
-           apoc.text.join(
-             apoc.coll.toSet([
-               p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors])
-               WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)
-               | p.name
-             ]), 
-             ", "
-           )
+             | p.name
+           ]), 
+           ", "
+         )
        END
-     }}] AS conflict_details
+     }] AS conflict_details
 
-
-// Return the final structured result
-RETURN {{
+RETURN {
   summary: summary_text,
   conflict_details: conflict_details
-}} AS RULAC_research```
+} AS RULAC_research
+```
 
 
 Remember, your task is to return a single cypher query for the user research question. Note: Do not include any explanations or apologies in your responses.
