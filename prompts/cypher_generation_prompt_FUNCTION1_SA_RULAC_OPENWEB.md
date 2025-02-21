@@ -365,11 +365,17 @@ It can also be used for comparison counts between state actors, e.g. "Which stat
 
 `conflict_details` should always include all fields regardless of research question
 
+
 ---
 Example Research Question: What IACs and Military occupations is France or Russia involved in as a state actor?
 
 
 ```
+
+// Ensure all string literals use double quotes (") and avoid using single quotes ('), as single quotes will break the Cypher syntax.
+// Do not add single quotes after WHEN or SIZE, for example this is valid:
+// state_parties: CASE WHEN SIZE(...) ELSE ... END
+
 // Define the target state actor(s) and optional conflict type(s)
 WITH ["250", "643"] AS target_state_actor_UN_M49_codes, 
      ["International Armed Conflict (IAC)", "Military Occupation"] AS target_conflict_types
@@ -474,19 +480,30 @@ WITH CASE
          ". Breakdown by state actor: " + breakdownText + "."
      END AS summary_text, global_conflicts, state_conflict_data
 
-// Prepare detailed conflict information. For every distinct conflict in the global set, we build a map of its details—using fallback values when necessary. Attention, do not add single quotes after WHEN or SIZE, for example this is valid: state_parties:CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([...
+// Prepare detailed conflict information. For every distinct conflict in the global set, we build a map of its details—using fallback values when necessary. 
 
-WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_conflicts | 
-{{
+
+WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_conflicts | {{
   conflict_name: COALESCE(conf.name, "Unknown"),
   conflict_classification: COALESCE([item IN apoc.coll.flatten([d IN state_conflict_data | d.conflict_types]) WHERE item.conflict = conf | item.type][0], "Unclassified"),
   conflict_overview: COALESCE(conf.overview, "No Overview Available"),
   applicable_ihl_law: COALESCE(conf.applicable_law, "Not Specified"),
   conflict_citation: COALESCE(conf.citation, "No Citation Available"),
-  state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 THEN "No state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END,
-  non_state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 THEN "No non-state actors recorded" ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") END
-}}
-] AS conflict_details
+
+  // Build state parties list, ensure no single quotes around CASE or SIZE
+  state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 
+    THEN "No state actors recorded" 
+    ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "StateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") 
+  END,
+
+  // Build non-state parties list, ensure no single quotes around CASE or SIZE
+  non_state_parties: CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf)])) = 0 
+    THEN "No non-state actors recorded" 
+    ELSE apoc.text.join(apoc.coll.toSet([p IN apoc.coll.flatten([d IN state_conflict_data | d.all_actors]) WHERE "NonStateActor" IN labels(p) AND (p)-[:IS_PARTY_TO_CONFLICT]->(conf) | p.name]), ", ") 
+  END
+}}] AS conflict_details
+
+// Return the final structured result
 RETURN {{
   summary: summary_text,
   conflict_details: conflict_details
