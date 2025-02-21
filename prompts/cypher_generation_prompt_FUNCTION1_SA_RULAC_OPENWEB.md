@@ -474,8 +474,8 @@ WITH CASE
          ". Breakdown by state actor: " + breakdownText + "."
      END AS summary_text, global_conflicts, state_conflict_data
 
-// Prepare detailed conflict information. For every distinct conflict in the global set,
-// we build a map of its details—using fallback values when necessary.
+// Prepare detailed conflict information. For every distinct conflict in the global set, we build a map of its details—using fallback values when necessary. Attention, do not add single quotes after WHEN or SIZE, for example this is valid: state_parties:CASE WHEN SIZE(apoc.coll.toSet([p IN apoc.coll.flatten([...
+
 WITH summary_text, global_conflicts, state_conflict_data, [conf IN global_conflicts | 
 {{
   conflict_name: COALESCE(conf.name, "Unknown"),
