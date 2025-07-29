@@ -11,3 +11,6 @@ requests
 pytest
 pytest-asyncio
 rich
+langchain-ollama
+langchain-mistralai
+PySocks

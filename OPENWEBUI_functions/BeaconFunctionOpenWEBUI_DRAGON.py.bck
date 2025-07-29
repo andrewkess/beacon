@@ -1,0 +1,1662 @@
+"""
+requirements: coloredlogs==15.0.1, langgraph, langchain-groq==0.2.1, langchain-core==0.3.35, langchain-community==0.3.10, pydantic==2.10.3, fastapi==0.115.6, asyncio, langchain-neo4j==0.3.0, requests==2.32.3, langchain-mistralai==0.2.6, rich, openai, mistralai, beautifulsoup4==4.12.3
+"""
+from typing import AsyncGenerator
+from typing import Any, Awaitable, Callable
+from langchain_core.tools import StructuredTool
+from langchain_groq import ChatGroq
+from langchain_neo4j import GraphCypherQAChain
+from langchain_neo4j import Neo4jGraph
+from langchain.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+from fastapi import Request
+import asyncio
+import os
+import json
+import re
+import requests
+import coloredlogs
+from langchain_core.tools import tool
+import logging
+from langchain_core.messages import (
+    AIMessage,
+    SystemMessage,
+    HumanMessage,
+    ToolMessage,
+    BaseMessageChunk
+)
+from langchain_core.messages.utils import convert_to_openai_messages
+from langchain_mistralai import ChatMistralAI
+# from langchain_ollama import ChatOllama
+# from langchain_mistralai.agents import Agents
+from rich.console import Console
+from rich.panel import Panel
+from rich.pretty import Pretty
+from rich.text import Text
+from rich.markdown import Markdown
+from rich.table import Table
+import os
+from mistralai import Mistral
+from openai import OpenAI
+from typing import List, Dict
+from typing import List, Union, Generator, Iterator
+from typing import AsyncGenerator
+import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+# Load Beacon public code files either in mounted volume (when running normally) or just from local files (when running tests)
+if os.path.exists("/app/backend/beacon_code"):
+    # Ensure that the mounted volume is in sys.path so that the beacon_code package can be found.
+
+    sys.path.insert(0, "/app/backend/beacon_code")
+    print("DEBUG: Updated sys.path:", sys.path)
+
+
+# Load Beacon public files from either local files or on server if os path exists
+
+try:
+    # print("Running in local mode: using local version")
+
+        # tools / function
+    from tools.RULAC_tools import retreive_RULAC_conflict_data_by_state_actor_involvement
+    from tools.RULAC_tools import retreive_RULAC_conflict_data_by_non_state_actor_involvement,retreive_RULAC_conflict_data_by_conflict_taking_place_in_country, retreive_RULAC_conflict_data_by_organization, retreive_RULAC_conflict_data_by_region, getBaselineRULACinformation, get_Conflict_Classification_Methodology, get_International_Humanitarian_Legal_Framework, get_website, brave_search
+
+    # Final System Prompts for General and Tool Agents
+    from prompts.final_prompts import final_beacon_base_model_prompt
+    from prompts.final_prompts import final_tool_prompt
+
+
+
+except Exception as e:
+    print("DEBUG: Error importing beacon files:", e)
+    raise
+
+
+# // LOGGING //
+
+# Configure logging (should be set to INFO unless DEBUG needed)
+logger = logging.getLogger("Beacon")
+coloredlogs.install(
+    logger=logger,
+    level="DEBUG",
+    isatty=True,
+    fmt="%(asctime)s [%(levelname)s] %(message)s",
+)
+# Initialize Rich Console
+console = Console()
+
+
+# // TYPE DEFINITIONS //
+
+class User(BaseModel):
+    """Available User data from OPENWEBUI"""
+    id: str
+    email: str
+    name: str
+    role: str
+
+class RouterResponse(BaseModel):
+    """Router Response from a User New Message"""
+    task: str = Field(..., description="A rewritten user task based on full conversation context.")
+    router_decision: str = Field(..., description="A routing decision either USE_RESEARCH_TOOL_LLM or USE_GENERAL_LLM")
+
+
+# // HELPER FUNCTIONS //
+
+def load_template_from_path(file_path: str) -> str:
+    """
+    Load template text from a local file path.
+    """
+    with open(file_path, "r", encoding="utf-8") as file:
+        return file.read()
+
+def compile_conversation(conversation_messages: list[dict]) -> str:
+    """
+    Turns a list of messages into a single text block for the prompt.
+    Each message is labeled by role, then the content.
+    """
+    text_blocks = []
+    for msg in conversation_messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        text_blocks.append(f"{role.upper()}: {content}")
+    return "\n".join(text_blocks)
+
+def convert_messages_to_final_prompt(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    Convert the given messages into a new prompt that includes a system message
+    with the research extracted from tool outputs and the last user message.
+    
+    Args:
+        messages: A list of message dicts. Each dict is expected to have at least a 'role'
+                  and 'content'. Tool messages should have 'role' == 'tool'.
+                  
+    Returns:
+        A new list of messages containing:
+          - A system message with embedded research.
+          - The last user message.
+    """
+    # Extract research content from any tool messages.
+    research_outputs = [
+        msg.get("content", "").strip()
+        for msg in messages
+        if msg.get("role") == "tool" and msg.get("content")
+    ]
+    
+    # Join research outputs with two newlines.
+    research_text = "\n\n".join(research_outputs)
+    
+    # Retrieve the last user message from the list.
+    user_messages = [msg for msg in messages if msg.get("role") == "user"]
+    if user_messages:
+        last_user_msg = user_messages[-1]
+    else:
+        # Fallback: if no user message is found, default to an empty message.
+        last_user_msg = {"role": "user", "content": ""}
+    
+    # Create the new system message embedding the research.
+    system_content = (""" 
+        "You are a helpful expert in human rights, armed conflict and international humanitarian law. You answer questions and complete tasks using RULAC research. If you do not know the answer, say so.
+        
+        RULAC research is from the Rule of Law in Armed Conflicts (RULAC) project, which systematically qualifies situations of armed violence using the definition of armed conflict under international humanitarian law, and identifies the parties to these conflicts and applicable international law.
+        
+        <RULAC_research>{research_text}</RULAC_research>""")
+    #         When assisting a user, at the end of your message, offer a followup question to keep the conversation going.
+
+    new_system_msg = {"role": "system", "content": system_content}
+    
+    # Construct the final prompt with the system message and the last user message.
+    final_prompt = [new_system_msg, last_user_msg]
+    return final_prompt
+
+
+
+# // PIPELINE //
+
+class Pipe:
+
+    # Setup user-configurable Valves providing API keys and access
+    class Valves(BaseModel):
+        neo4j_url: str = Field("bolt://neo4j-arm:7687", description="Neo4j Bolt URL")
+        neo4j_testing_url: str = Field(
+            "bolt://localhost:7687", description="Neo4j Testing URL"
+        )  # Option needed for local test suite process
+        neo4j_username: str = Field("neo4j", description="Neo4j username")
+        neo4j_password: str = Field("password", description="Neo4j password")
+        groq_api_key: str = Field("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", description="API key for Groq")
+        mistral_api_key: str = Field("9hblEwepQtzvyY9y4incc3yvApk4ArJO", description="API key for Mistral")
+        deepseek_api_key: str = Field("sk-28cf4f690b704c76b3f3c6622d7b87cd", description="API key for Deepseek")
+        
+        # Web search tool parameters
+        searxng_url: str = Field("http://localhost:8081/search", description="SearXNG API URL")
+        ignored_websites: str = Field("", description="Comma-separated list of websites to ignore in search results")
+        page_content_words_limit: int = Field(5000, description="Limit words content for each page")
+
+        
+
+    # Initialize pipeline (ie. once at start) to define the neo4j URL and the LLMs to use
+    def __init__(self, local_testing: bool = False):
+        self.valves = self.Valves()
+        self.local_testing = local_testing  # Set local testing flag
+        # Initialize global variables for RULAC citations
+        self.global_unique_RULAC_citations_retreived = set()
+        self.global_RULAC_conflict_citations_to_emit = []
+
+        # Dynamically switch Neo4j URL based on the flag
+        neo4j_url = (
+            self.valves.neo4j_testing_url
+            if self.local_testing
+            else self.valves.neo4j_url
+        )
+
+        # Debugging: Neo4j connection
+        print(f"DEBUG: Connecting to Neo4j at {neo4j_url} with username {self.valves.neo4j_username}")
+
+        try:
+            # Connect to Neo4j using the provided credentials
+            self.graph = Neo4jGraph(
+                url=neo4j_url,
+                username=self.valves.neo4j_username,
+                password=self.valves.neo4j_password,
+                enhanced_schema=False,
+            )
+        except Exception as conn_error:
+            raise Exception(f"Error connecting to Neo4j: {conn_error}") from conn_error
+
+
+
+        # // Initialize all LLMs using API key and models //
+
+        # 1. Router LLM (in order of pref)
+        # self.router_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model="gemma2-9b-it", temperature=0) # Gemma2 9B, quick and good at general classifying
+
+        self.router_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model="llama-3.1-8b-instant", temperature=0) # ultra fast workhorse but with basic intelligence
+
+        # 2. General LLM (in order of pref)
+        self.general_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model="llama3-70b-8192", temperature=0, streaming=True) # Basic start w fast and general intellgent llama3 70B, TO DO: switch to Mistral
+
+
+        # 3. Tool-Use LLM (in order of pref) - Must be a LLM that features tool use (llama3, etc.)
+        self.tool_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model="llama-3.3-70b-versatile", temperature=0) # for now, very fast and intelligent enough... may run into context size issues depending on how much research is retreived from tools
+
+        # self.tool_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model="llama-3.1-8b-instant", temperature=0) # ultra fast with higher context window but not very intelligent and can get confused with too much data
+        
+        # Import tools
+        try:
+            # RULAC and website tools
+            from tools.RULAC_tools import retreive_RULAC_conflict_data_by_state_actor_involvement 
+            from tools.RULAC_tools import retreive_RULAC_conflict_data_by_non_state_actor_involvement 
+            from tools.RULAC_tools import retreive_RULAC_conflict_data_by_conflict_taking_place_in_country 
+            from tools.RULAC_tools import retreive_RULAC_conflict_data_by_organization 
+            from tools.RULAC_tools import retreive_RULAC_conflict_data_by_region 
+            from tools.RULAC_tools import getBaselineRULACinformation 
+            from tools.RULAC_tools import get_Conflict_Classification_Methodology 
+            from tools.RULAC_tools import get_International_Humanitarian_Legal_Framework 
+            from tools.RULAC_tools import get_website
+            from tools.RULAC_tools import brave_search
+
+            # Final System Prompts for General and Tool Agents
+            from prompts.final_prompts import final_beacon_base_model_prompt
+            from prompts.final_prompts import final_tool_prompt
+
+        except Exception as e:
+            print("DEBUG: Error importing tools or prompts:", e)
+            raise
+
+        # Bind tools to tool model, for now, only RULAC tool, can add new tools later (HRW, ICRC, etc.)
+        self.tools = [
+            # RULAC tools
+            retreive_RULAC_conflict_data_by_state_actor_involvement, 
+            retreive_RULAC_conflict_data_by_non_state_actor_involvement, 
+            retreive_RULAC_conflict_data_by_conflict_taking_place_in_country, 
+            retreive_RULAC_conflict_data_by_organization, 
+            retreive_RULAC_conflict_data_by_region, 
+            getBaselineRULACinformation, 
+            get_Conflict_Classification_Methodology, 
+            get_International_Humanitarian_Legal_Framework,
+            
+            # Web search tools
+            brave_search,
+            get_website
+        ]
+        
+        
+        self.tool_model_with_tools = self.tool_model.bind_tools(self.tools)
+
+
+    # Main execution logic that starts and ends full pipeline, messages are sent as 'body' input from the OPENWEBUI app and/or through local testing
+    # For now, we are just returning a string to display in OPENWEBUI chatbox but could think about returning different types in future work
+    # TO DO: determine how and if streaming is enabled in our models....
+    async def pipe(
+        self,
+        body: dict,
+        __user__: dict,
+        __request__: Request,
+        __event_emitter__=None,
+        local_testing: bool = False,
+    ) -> Union[str, Generator, Iterator, AsyncGenerator]:
+        # Convert __user__ to User type in OpenWebUI
+        user = User(**__user__)
+
+        # reseting the unique RULAC citations set at start of new pipe 
+        self.global_unique_RULAC_citations_retreived = set()
+        self.global_RULAC_conflict_citations_to_emit = []
+
+        # STEP 1: Analyze User Request and determine which LLM to use (generalist LLM or tool-enabled for research LLM)
+
+        # Extract messages from body input
+        logger.debug("Full conversation data input:\n%s", json.dumps(body, indent=2))
+        messages = body.get("messages", [])
+        logger.debug("All messages extracted from conversation:\n%s", json.dumps(messages, indent=2))
+
+        #Define and emit event
+        eventMessageUI = "🔍 Analyzing request..."
+        # Emit event for UI (user facing)
+        if __event_emitter__:
+            await __event_emitter__(
+                {
+                    "type": "status",
+                    "data": {
+                        "description": eventMessageUI,
+                        "done": False,
+                    },
+                }
+            )
+        # Emit event for logs (developer facing)
+        panel = Panel.fit(eventMessageUI, style="black on yellow", border_style="yellow")       
+        # Print nicely formatted box to console
+        console.print(panel)
+
+
+
+        # Call Router, passing in all conversational messages for full context, to understand user intent
+        router_result = await self.router(messages)
+
+        #Router returns its router decision (classification) and its rewritten user task/query (task) based on full context
+        AI_generated_routing = router_result.router_decision
+        AI_generated_user_task = router_result.task
+
+        # Manually route to the appropriate LLM (general or tool-based) according to Router decision
+        if AI_generated_routing == "USE_RESEARCH_TOOL_LLM":
+            messagesWToolOutputs = await self.handle_tool_query(messages, __event_emitter__)
+            result = self.handle_tool_query_final_response(messagesWToolOutputs)
+        elif AI_generated_routing == "USE_GENERAL_LLM":
+            # Return the async generator directly for streaming.
+            # Passing all convo messages so answer has full previous context when drafting answer
+            result = self.handle_general_query(messages)
+        else:  # default routing catchall to tool query
+            messagesWToolOutputs = await self.handle_tool_query(messages, __event_emitter__)
+            result = self.handle_tool_query_final_response(messagesWToolOutputs)
+
+
+
+
+        #Define and emit final event
+
+        # GROUP ALL TOOL MESSAGE CITATION COUNTS to display final citation matches in UI 
+        print(f"DEBUG: Total citations emitted: {len(self.global_unique_RULAC_citations_retreived)}")
+
+
+        count = len(self.global_unique_RULAC_citations_retreived)
+        if count:
+            eventMessageUI = f"🌐 Answer enhanced w {count} RULAC source{'s' if count != 1 else ''}"
+        else:
+            eventMessageUI = ""
+
+
+        # Emit event for UI (user facing)
+        if __event_emitter__:
+            await __event_emitter__(
+                {
+                    "type": "status",
+                    "data": {
+                        "description": eventMessageUI,
+                        "done": True,
+                    },
+                }
+            )
+        # Emit event for logs (developer facing)
+        panel = Panel.fit(eventMessageUI, style="black on yellow", border_style="yellow")       
+        # Print nicely formatted box to console
+        console.print(panel)
+
+        # FINAL ANSWER sent to OPENWEBUI as a streaming Generator
+        return result
+
+
+
+    # Router 
+    async def router(self, conversation_messages: list[dict]) -> RouterResponse:
+        """
+        Router analyzes the user's intent (by taking into account the full conversation history) to identify the user task. It also determines if the user's task would benefit from any available research tools (in which case it is routed to the tool-use LLM), otherwise it is routed to the generalist LLM.
+        
+        - Accepts the entire messages conversation (not just last user message).
+        - Outputs a structured JSON indicating the user task and routing decision.
+        """
+
+        # DEBUGGING statement
+        if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel.fit(
+                Pretty(conversation_messages),
+                style="black on deep_sky_blue3", 
+                border_style="blue",
+                title="[ROUTER DEBUGGING] Input conversation messages",
+                title_align="left"
+            )            
+            console.print(panel)
+
+        # 1. Compile conversation
+        cleaned_conversation_text = compile_conversation(conversation_messages)
+
+        # DEBUGGING statement
+        if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel.fit(
+                Pretty(cleaned_conversation_text),
+                style="black on grey85",  # Black text on light grey background
+                border_style="grey58",  # Slightly darker grey border for contrast
+                title="[ROUTER DEBUGGING] Cleaned conversation text",
+                title_align="left"
+            )            
+            console.print(panel)
+
+        # 2. Build prompt
+        ROUTER_PROMPT = """You are a task classification assistant named "Beacon". You must return valid JSON only.
+        
+        ## Steps
+
+        1. Read the entire conversation carefully.
+        
+        ### Conversation
+        {conversation}
+
+        2. Identify the last user message and infer the user task in context of the conversation history.
+        
+        3. Identify the task to complete, synthesizing the last user message. Your "task" field should preserve the user's original wording and intent as closely as possible, only performing minimal rewording if necessary for clarity.
+        
+        4. Decide if the user task can be supplemented with research from:
+        
+        - a. RULAC (Rule of Law in Armed Conflict) provides research data on armed conflict (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations), including state actors, non-state actors, and applicable international humanitarian law.
+        
+        - b. Web search capabilities which can provide recent information about conflicts, human rights situations, and current events that may not be in the RULAC database.
+        
+        If so, assign a router_decision of "USE_RESEARCH_TOOL_LLM" otherwise assign a router_decision of "USE_GENERAL_LLM"
+        
+        5. Assign "USE_RESEARCH_TOOL_LLM" whenever the user's task:
+           - Requires factual information about recent events, news, or current situations
+           - Asks for specific information that would benefit from web search
+           - Involves questions about recent developments in conflicts or human rights situations
+           - Mentions current events, dates, or time periods after 2023
+           - Requires accessing specific websites or URLs
+
+        6. If the user task involves editing or rewriting a previous ASSISTANT message, assign a router_decision of "USE_GENERAL_LLM" if the conversation already contains all the elements necessary to complete the task
+        
+        7. If the user task involves asking questions about or concerning information about you, i.e. the Beacon AI, assign a router_decision of "USE_GENERAL_LLM"
+
+        8. Return only the JSON object. Do not include any additional commentary or text.
+        Your required output JSON must follow this schema exactly:
+        {{"task": "string (the last user message as a task, preserving original wording)", "router_decision": "string (must be either USE_RESEARCH_TOOL_LLM or USE_GENERAL_LLM)"}}"""
+        
+        system_prompt = ROUTER_PROMPT.format(conversation=cleaned_conversation_text)
+
+        # 3. Invoke the model
+        messages = [
+            {"role": "system", "content": system_prompt},
+        ]
+
+        # DEBUGGING statement
+        if logger.getEffectiveLevel() == logging.DEBUG:
+            formatted_text = Text(system_prompt, style="black on deep_sky_blue3", no_wrap=False, justify="left")
+
+            panel = Panel(
+                formatted_text,
+                border_style="blue",  # Keep blue border
+                title="[ROUTER DEBUGGING] Compiled Prompt sent to LLM",
+                title_align="left",
+                expand=True,  # Expands panel width dynamically
+            )            
+            console.print(panel)
+
+        # 4. Validate and return RouterResponse 
+        response = self.router_model.invoke(messages)
+        raw_output = response.content.strip()
+
+        # DEBUGGING statement
+        if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel.fit(
+                Pretty(raw_output),
+                style="black on grey85",  # Black text on light grey background
+                border_style="grey58",  # Slightly darker grey border for contrast
+                title="[ROUTER DEBUGGING] Raw output returned from Router LLM",
+                title_align="left"
+            )            
+            console.print(panel)
+
+        try:
+            # If needed, sanitize raw_output here (remove backticks, etc.)
+            router_json = json.loads(raw_output)
+            validated_response = RouterResponse(**router_json)
+
+            # THESE ARE ALL JUST FOR INFO TRACING NOW
+            # Identify the last user message
+            last_user_message = None
+            for msg in reversed(conversation_messages):
+                if msg.get("role") == "user":
+                    last_user_message = msg.get("content")
+                    break
+
+            # Ensure we have content
+            last_user_message = last_user_message or "No user message found."
+
+            # Extract router decision and user query from validated response
+            router_decision = validated_response.router_decision if hasattr(validated_response, "router_decision") else "N/A"
+            task = validated_response.task if hasattr(validated_response, "task") else "N/A"
+
+            # Construct the formatted text with line breaks
+            formatted_text = Text()
+            formatted_text.append("Last User Message in Convo:\n", style="bold underline")
+            formatted_text.append(last_user_message + "\n\n", style="italic")  # User message with line break
+            formatted_text.append("Router Decision:\n", style="bold underline")
+            formatted_text.append(router_decision + "\n\n", style="bold")  # Extracted router decision
+            formatted_text.append("Rewritten User Task:\n", style="bold underline")
+            formatted_text.append(task)  # Extracted user query
+
+            # INFO statement
+            panel = Panel(
+                formatted_text,
+                style="white on orange3",  # White text on orange background
+                border_style="orange3",
+                title="[ROUTER] Final Router Answer for User Message",
+                title_align="left",
+            )
+            console.print(panel)
+        
+            # Router response is now validated JSON and returned to Pipe
+            return validated_response
+
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.error(f"Router JSON parse error: {e}")
+            raise ValueError(f"Invalid JSON from router: {raw_output}") from e
+
+
+
+
+    def handle_general_query(self, conversation_messages: list[dict]) -> Generator[str, None, None]:
+        """
+        Handle general queries by invoking the general ChatGroq model and returning a generator
+        that yields streaming tokens as they are produced.
+        """
+        # Debug shape of conversation messages
+        # logger.debug(f"Actual Conversation Messages passed in: {conversation_messages}")
+
+        FINAL_SYSTEM_PROMPT = final_beacon_base_model_prompt.PROMPT
+
+        # Get the current date and time and format it as a human-readable string.
+        currentDateTime = datetime.now(ZoneInfo("Europe/Paris")).strftime("%B %d, %Y %I:%M %p")
+
+        # Create a PromptTemplate with your input variables.
+        FINAL_PROMPT = PromptTemplate(
+                input_variables=["currentDateTime"],
+                template=FINAL_SYSTEM_PROMPT,
+            )
+
+        rendered_prompt = FINAL_PROMPT.format(
+                currentDateTime=currentDateTime,
+            )
+
+
+        # Start with a system message that provides context or instructions.
+        system_beacon_and_cleaned_conversation_messages = [
+            SystemMessage(content=rendered_prompt),
+        ]
+
+
+        # For each message in the conversation, convert it to the appropriate LangChain message type.
+        for msg in conversation_messages:
+            role = msg.get("role", "").lower()
+            content = msg.get("content", "")
+            if role == "user":
+                system_beacon_and_cleaned_conversation_messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                system_beacon_and_cleaned_conversation_messages.append(AIMessage(content=content))
+            elif role == "system":
+                # In case system messages are passed in the conversation.
+                system_beacon_and_cleaned_conversation_messages.append(SystemMessage(content=content))
+            else:
+                # Optionally handle other roles (like tool messages) if needed.
+                logger.debug(f"Unrecognized role '{role}' in message; skipping.")
+
+        # logger.debug(f"Final Compiled Conversation Messages sent to General LLM: {system_beacon_and_cleaned_conversation_messages}")
+
+        logger.debug("Inside handle_general_query; starting synchronous streaming...")
+
+
+
+        # console.print(f"Rendered Final Prompt:\n{rendered_prompt}")
+
+
+
+
+
+        try:
+            # Get the synchronous streaming generator from the general model.
+            # (Assuming self.general_model.stream returns a generator of message chunks.)
+            stream = self.general_model.stream(system_beacon_and_cleaned_conversation_messages, stop=None)
+            for i, chunk in enumerate(stream):
+                if hasattr(chunk, "content"):
+                    yield chunk.content
+                else:
+                    logger.debug(f"Chunk {i} has no 'content' attribute.")
+            logger.debug("Finished processing all chunks.")
+        except Exception as e:
+            logger.error(f"Streaming invocation failed: {e}")
+            yield f"Error: {e}"
+
+
+
+
+
+
+# should return a final dictionary of messages with tool output added
+    async def handle_tool_query(self, conversation_messages: list[dict], __event_emitter__) -> list[dict]:
+        """
+        Handle user tasks/queries by using an LLM that can call tools (e.g. RULAC, etc)
+        Takes full conversation history and extracts the last user message
+        """
+
+        # Extract the last user message from the conversation
+        last_user_message = None
+        for msg in reversed(conversation_messages):
+            if msg.get("role") == "user":
+                last_user_message = msg.get("content")
+                break
+        
+        # If no user message found, use a default message
+        if not last_user_message:
+            last_user_message = "Please provide information about RULAC."
+
+        # Display initial debug message
+        panel = Panel.fit(
+            f"Executing tool model for message:\n{last_user_message}",
+            style="black on yellow",
+            border_style="yellow",
+        )
+        console.print(panel)
+
+        eventMessageUI = f"🛠️  Researching with tools..."
+
+        # Emit event for UI (user facing)
+        if __event_emitter__:
+            await __event_emitter__(
+                {
+                    "type": "status",
+                    "data": {
+                        "description": eventMessageUI,
+                        "done": False,
+                    },
+                }
+            )
+        # Emit event for logs (developer facing)
+        panel = Panel.fit(eventMessageUI, style="black on yellow", border_style="yellow")       
+        # Print nicely formatted box to console
+        console.print(panel)
+
+        # Prepare messages for the specialized tool model
+        system_message = SystemMessage(
+            content=(
+                """You are a helpful expert in human rights, armed conflict and international humanitarian law. You answer questions about human rights, conflict and international humanitarian law by using tools that provide you with research."
+                "Your research is from reputable sources, including the Rule of Law in Armed Conflicts (RULAC) project, which systematically qualifies situations of armed violence using the definition of armed conflict under international humanitarian law. RULAC also identifies the parties to these conflicts and applicable international law.
+                
+                RULAC Tools:
+                - To retreive conflict research for a state actor, use the tool "retreive_RULAC_conflict_data_by_state_actor_involvement"
+                - To retreive conflict research about a conflict "involving" a non-state actor, use the tool "retreive_RULAC_conflict_data_by_non_state_actor_involvement"
+                - To retreive conflict research about a conflict "taking place" in a geographical location, i.e. a country, use the tool "retreive_RULAC_conflict_data_by_conflict_taking_place_in_country"
+                - To retreive conflict research about a conflict "taking place" in a region, use the tool "retreive_RULAC_conflict_data_by_region"
+                - To retreive conflict research about a conflict "involving" an organization, use the tool "retreive_RULAC_conflict_data_by_organization"
+                - To retreive general research about RULAC, use the tool "getBaselineRULACinformation"
+                - To retreive detailed information about RULAC's conflict classification methodology, use the tool "get_Conflict_Classification_Methodology"
+                - To retreive information about the International Humanitarian Law legal framework, use the tool "get_International_Humanitarian_Legal_Framework"
+                
+                Web Search Tools:
+                - To retrieve information from a specific website URL, use the tool "get_website" 
+                - To search the web for current information, recent conflicts, or humanitarian situations, use the tool "brave_search"
+               
+                You can use more than one tool if needed. Select the most appropriate tools based on the user's query.
+                
+                For questions about recent events, current situations, or information that may not be in the RULAC database, always use the web search tools.
+                
+                If you need to use more than one tool, make sure to use the most relevant and specific tools first. For comprehensive answers, consider using both RULAC and web search tools when appropriate.
+                
+                """
+                # - To search the web for current information, recent conflicts, or humanitarian situations, use the tool "web_search"
+
+                # # "Once you have enough research from your tools, you should complete the user task, and offer more details on the subject in the form of a followup question."
+                # # "Important: You must use at least ONE tool to retreive research before providing an answer. You must start with at least ONE tool."
+                # """
+            )
+        )
+
+        # Initialize messages with the system message
+        messages = [system_message]
+        
+        # Add all conversation messages converted to appropriate LangChain message types
+        for msg in conversation_messages:
+            role = msg.get("role", "").lower()
+            content = msg.get("content", "")
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                messages.append(AIMessage(content=content))
+            elif role == "system":
+                # Skip system messages as we've already set our custom system message
+                pass
+            # Skip any other roles for now
+
+        try:
+            # Send initial message to the LLM with tools and force the tool choice
+            ai_msg = self.tool_model_with_tools.invoke(messages, tool_choice="required")
+            # ai_msg = self.tool_model_with_tools.invoke(messages)
+
+
+            # Display tool master decision
+            formatted_tool_decision = Text()
+            formatted_tool_decision.append("Tool Decision Summary\n", style="bold underline")
+            
+            # Format tool calls if any
+            if hasattr(ai_msg, 'tool_calls') and ai_msg.tool_calls:
+                for i, tool_call in enumerate(ai_msg.tool_calls, 1):
+                    formatted_tool_decision.append(f"\nTool Call {i}:\n", style="bold")
+                    formatted_tool_decision.append(f"Name: {tool_call['name']}\n")
+                    formatted_tool_decision.append("Arguments:\n")
+                    for key, value in tool_call['args'].items():
+                        formatted_tool_decision.append(f"  {key}: {value}\n")
+            else:
+                formatted_tool_decision.append("No tool calls made\n")
+
+            panel = Panel(
+                formatted_tool_decision,
+                style="white on blue",
+                border_style="blue",
+                title="[TOOL DECISIONS]",
+                title_align="left",
+                expand=True,
+            )
+            console.print(panel)
+
+            messages.append(ai_msg)
+
+            # Process tool calls if any
+            for tool_call in ai_msg.tool_calls:
+                formatted_tool_call = Text()
+                formatted_tool_call.append("Processing Tool Call\n", style="bold underline")
+                formatted_tool_call.append(f"\nTool Name: {tool_call['name']}\n", style="bold")
+                formatted_tool_call.append("Arguments:\n")
+                for key, value in tool_call['args'].items():
+                    formatted_tool_call.append(f"  {key}: {value}\n")
+
+                panel = Panel(
+                    formatted_tool_call,
+                    style="black on cyan",
+                    border_style="cyan",
+                    title="[TOOL CALL]",
+                    title_align="left",
+                    expand=True,
+                )
+                console.print(panel)
+
+
+                # Select the appropriate tool from available options
+                selected_tool = {
+                    # "get_human_rights_research": get_human_rights_research,
+                    "retreive_RULAC_conflict_data_by_state_actor_involvement": retreive_RULAC_conflict_data_by_state_actor_involvement,
+                    "retreive_RULAC_conflict_data_by_non_state_actor_involvement": retreive_RULAC_conflict_data_by_non_state_actor_involvement,
+                    "retreive_RULAC_conflict_data_by_conflict_taking_place_in_country":retreive_RULAC_conflict_data_by_conflict_taking_place_in_country, 
+                    "retreive_RULAC_conflict_data_by_organization": retreive_RULAC_conflict_data_by_organization,
+                    "retreive_RULAC_conflict_data_by_region": retreive_RULAC_conflict_data_by_region,
+                    "getBaselineRULACinformation": getBaselineRULACinformation,
+                    "get_Conflict_Classification_Methodology": get_Conflict_Classification_Methodology,
+                    "get_International_Humanitarian_Legal_Framework": get_International_Humanitarian_Legal_Framework,
+                    "get_website": get_website,
+                    "brave_search": brave_search
+                    }[tool_call["name"]]
+
+ 
+                # Include self and event emitter in the arguments
+                tool_args = {
+                    **tool_call["args"],  # Original tool arguments
+                    "pipeSelf": self,  # Add self
+                    "event_emitter": __event_emitter__,  # Add event emitter
+                }
+
+                # Fix malformed brave_search calls with params parameter
+                if tool_call["name"] == "brave_search" and "params" in tool_args:
+                    # Log the issue
+                    logger.warning(f"Malformed brave_search call detected with params: {tool_args}")
+                    
+                    # Remove the params parameter
+                    params = tool_args.pop("params", None)
+                    logger.info(f"Removed params parameter from brave_search call: {params}")
+                    
+                    # Log the updated tool_args
+                    logger.info(f"Updated tool_args: {tool_args}")
+
+                # logger.debug(f"Dynamic Tool arguments added: {tool_args}")
+
+                # Always use `ainvoke` for StructuredTool
+                try:
+                    tool_output = await selected_tool.ainvoke(tool_args)
+
+                    # # Debugging panel for tool output
+                    # panel = Panel.fit(
+                    #     f"✅ Tool Output Added to Messages:\n{tool_output}",
+                    #     style="white on green",
+                    #     border_style="green",
+                    # )
+                    # console.print(panel)
+
+                # handle parallel tool requests, adding each Tool call results to a ToolMessage that collects context along the way
+                    messages.append(
+                        # AIMessage(
+                        #     content=tool_output
+                        # )
+                        ToolMessage(
+                            content=tool_output, tool_call_id=tool_call["id"]
+                        )
+                    )
+
+                except Exception as e:
+                    panel = Panel.fit(
+                        f"❌ Error invoking tool {tool_call['name']}:\n{e}",
+                        style="white on red",
+                        border_style="red",
+                    )
+                    console.print(panel)
+                    raise
+
+
+
+
+
+            print("DEBUG: Emitting all collected citations...")
+            for citation in self.global_RULAC_conflict_citations_to_emit:
+                print(f"DEBUG: Emitting citation for conflict: {citation['data']['source']['name']}")
+                await __event_emitter__(citation)
+            print(f"DEBUG: Total citations emitted: {len(self.global_RULAC_conflict_citations_to_emit)}")
+
+
+            # # GROUP ALL TOOL MESSAGE CITATION COUNTS to display final citation matches in UI 
+            # print(f"DEBUG: Total citations emitted: {len(self.global_unique_RULAC_citations_retreived)}")
+            # if self.global_unique_RULAC_citations_retreived:
+            #     status_message = f"💡 {len(self.global_unique_RULAC_citations_retreived)} CONFLICT PROFILE(S) RETRIEVED"
+            # else:
+            #     status_message = "🌍 NO CONFLICT PROFILE MATCHES"
+
+            # await __event_emitter__({
+            #     "type": "status",
+            #     "data": {"description": status_message, "done": False}
+            # })
+            # panel = Panel.fit(status_message, style="black on yellow", border_style="yellow")       
+            # console.print(panel)
+
+            # return messages, which now has all tool output
+            return messages
+
+        except Exception as e:
+            logger.error(f"Error during tool model execution: {e}")
+            return "An error occurred while using the tool model."
+
+
+    def handle_tool_query_final_response(self, messages: list[dict]) -> Generator[str, None, None]:
+        """
+        Handle final summary once all Tool calls are complete and returning a generator
+        that yields streaming tokens as they are produced.
+        """
+        logger.debug("Inside final tool query response function...")
+
+        # After processing all tool calls, convert internal messages to ChatMistral's expected format.
+        openai_messages = convert_to_openai_messages(messages)
+        # console.print(f"Converted messages for ChatMistral: {openai_messages}")
+
+        # Extract research content from any tool messages.
+        research_outputs = [
+            msg.get("content", "").strip()
+            for msg in openai_messages
+            if msg.get("role") == "tool" and msg.get("content")
+        ]
+        # Join research outputs with two newlines.
+        combined_RULAC_tool_research = "\n\n".join(research_outputs)
+
+        # Get the current date and time and format it as a human-readable string.
+        currentDateTime = datetime.now(ZoneInfo("Europe/Paris")).strftime("%B %d, %Y %I:%M %p")
+
+        # Create our system prompt with the RULAC research
+        FINAL_PROMPT_TEMPLATE = final_tool_prompt.PROMPT
+        rendered_system_prompt = FINAL_PROMPT_TEMPLATE.replace("{currentDateTime}", currentDateTime).replace("{combined_RULAC_tool_research}", combined_RULAC_tool_research)
+        
+        # Create the final messages array starting with the system message
+        final_messages = []
+        
+        # Add the system message
+        final_messages.append({"role": "system", "content": rendered_system_prompt})
+        
+        # Add all user and assistant messages from the original conversation
+        for msg in openai_messages:
+            role = msg.get("role", "").lower()
+            content = msg.get("content", "")
+            
+            # Only include user and assistant messages
+            if role in ["user", "assistant"] and content:
+                final_messages.append({"role": role, "content": content})
+        
+        # For debugging
+        # console.print(f"Final messages array: {final_messages}")
+
+        # Instantiate the ChatMistral client.
+        chat_client = ChatMistralAI(
+            api_key=self.valves.mistral_api_key,
+            model="mistral-large-latest",
+            temperature=0.2,
+            max_retries=2,
+            streaming=True
+        )
+
+        logger.debug("Inside handle_general_query; starting synchronous streaming...")
+
+        try:
+            # Now stream with the complete messages array
+            final_summary_LLM_stream = chat_client.stream(final_messages, stop=None)
+            for i, chunk in enumerate(final_summary_LLM_stream):
+                if hasattr(chunk, "content"):
+                    yield chunk.content
+                else:
+                    logger.debug(f"Chunk {i} has no 'content' attribute.")
+            logger.debug("Finished processing all chunks.")
+        except Exception as e:
+            logger.error(f"Streaming invocation failed: {e}")
+            yield f"Error: {e}"
+
+
+
+
+            # trying with deepseek
+            # Convert to OpenAI message format
+            # openai_messages = convert_to_openai_messages(messages)
+            # console.print(f"OpenAI converted messages w roles: {openai_messages}")
+            # client = OpenAI(api_key=self.valves.deepseek_api_key, base_url="https://api.deepseek.com")
+            # response = client.chat.completions.create(
+            #     messages=openai_messages,
+            #     stream=True
+            # )
+            # return response.choices[0].message.content
+
+            # trying with mistral
+            # Convert to OpenAI message format
+            # openai_messages = convert_to_openai_messages(messages)
+            # console.print(f"OpenAI converted messages w roles: {openai_messages}")
+            # client = Mistral(api_key=self.valves.mistral_api_key)
+            # chat_response = client.chat.complete(
+            #     model="mistral-large-latest", temperature=0,
+            #     messages = openai_messages
+            # )
+            # print(chat_response.choices[0].message.content)
+            # return chat_response.choices[0].message.content
+
+
+
+
+
+# TESTING SUITE
+
+
+
+import asyncio
+import json
+
+# Define multiple test scenarios
+# Each scenario is a list of messages simulating a conversation flow.
+test_scenarios = {
+    # "scenario_conflict_classification": [
+    #     {"role": "system", "content": "System: You are an AI assistant."},
+    #     {"role": "assistant", "content": "Assistant: Hello! How can I help you?"},
+    #     {"role": "user", "content": "I'm curious about the conflict in Ukraine."},
+    #     {
+    #         "role": "assistant",
+    #         "content": "Assistant: Sure! Are you interested in classification or specific details?",
+    #     },
+    #     {
+    #         "role": "user",
+    #         "content": "Specifically, I'd like to know if it's an International or Non-International Armed Conflict, and maybe some background.",
+    #     },
+    # ],
+
+    # "scenario_single_user_message1": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "Could you write me a poem about dogs?"},
+    #             {
+    #         "role": "assistant",
+    #         "content": "Dogs are blue, roses are red, don't be sad, dogs help you.",
+    #     },
+    #     {"role": "user", "content": "Could you rewrite that,  but just change the flower to violets? Sign it with today's date and time"},
+
+    # ],
+    # "scenario_single_user_message2": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "is france a state party to conflict?"},
+    # ],
+    # "scenario_basic_beacon_knowledge": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "What is international humanitarian law?"},
+    # ],
+    # "scenario_basic_beacon_self_knowledge": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "Who are you? and what is your purpose? what tasks can you perform?"},
+    # ],
+    
+    #     "scenario_non_state_actor_conflict_retreival": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "what conflicts involve boko?"},
+    # ],
+    #         "scenario_conflict_taking_place_in_country": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "what conflicts are taking place in Ukraine?"},
+    # ],
+    #         "scenario_conflicts_by_organization_tool": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "What IAC conflicts involve BRICS members?"},
+    # ],
+
+
+
+    #     "task_scenario_w_2_diff_tools": [
+    #     # Analytical tast, no system/assistant context
+    #     {"role": "user", "content": "Write a report that analyzes both france and russia's invovlement in NIAC conflict worldwide and the IHL that applies. one section should focus on france, one section should focus on russia, and the conclusion should compare the two countries' involvement to explore differences and similarities. Also add a small, separate section on the involvement of boko in africa."},
+    # ],
+    #     "task_scenario": [
+    #     # Analytical tast, no system/assistant context
+    #     {"role": "user", "content": "Write a report that analyzes conflicts taking place in syria and ukraine."},
+    # ],
+#             "task_scenario_w_edit": [
+#         # Analytical tast, no system/assistant context
+#         {"role": "user", "content": "Write a report that analyzes  frances invovlement in  conflict worldwide and the IHL that applies."},
+#         {"role": "assistant", "content": """
+         
+# ### France's Involvement in Armed Conflicts – RULAC Summary
+
+# According to the **Rule of Law in Armed Conflict (RULAC)** project, France is currently involved in six distinct armed conflicts. Here is an overview of these conflicts:
+
+# ---
+
+# ### 1. Non-International Armed Conflicts in the Central African Republic
+
+# **Overview:**  
+# The Central African Republic (CAR) is engaged in multiple non-international armed conflicts against various non-state actors, including ex-Séléka and anti-Balaka groups. The government is supported by the **United Nations Multidimensional Integrated Stabilization Mission (MINUSCA)**, Rwanda, the **Wagner Group**, and previously by France. Parallel conflicts also occur between different armed groups.
+
+# **State Parties:**  
+# - **France, Rwanda, Central African Republic**
+
+# **Non-State Parties:**  
+# - **Anti-Balaka Armed Group**  
+# - **Central African Liberators for Justice Movement (MLCJ)**  
+# - **Union for Peace in the Central African Republic (UPC)**  
+# - **Popular Front for the Renaissance in the Central African Republic (FPRC)**  
+# - **Return, Reclamation, and Rehabilitation (3R)**  
+# - **Séléka/Ex-Séléka Coalition Group**  
+# - **Central African Patriotic Movement (MPC)**  
+# - **United Nations Multidimensional Integrated Mission (MINUSCA)**  
+
+# ---
+
+# ### 2. Non-International Armed Conflicts in Niger
+
+# **Overview:**  
+# Niger faces several non-international armed conflicts, particularly against **Boko Haram** and the **Islamic State in West Africa Province (ISWAP)**. The **Multinational Joint Task Force (MNJTF)**, comprising units from Nigeria, Niger, Chad, Cameroon, and Benin, is active against Boko Haram. French forces have been present in Niger since July 2022, supporting the government.
+
+# **State Parties:**  
+# - **France, Niger**
+
+# **Non-State Parties:**  
+# - **ISWAP**  
+# - **Boko Haram**  
+# - **Multinational Joint Task Force (MNJTF)**  
+
+# ---
+
+# ### 3. International Armed Conflicts in Syria
+
+# **Overview:**  
+# Syria is involved in multiple international armed conflicts against the **US-led coalition**, **Türkiye**, and **Israel**. Türkiye occupies parts of northern Syria, while Israel occupies the **Golan Heights**. The US-led coalition, including France, conducts military operations in Syria.
+
+# **State Parties:**  
+# - **France, Netherlands, Italy, Belgium, Germany, UAE, Israel, Denmark, UK, Australia, Türkiye, Saudi Arabia, Jordan, Syrian Arab Republic, USA**
+
+# **Non-State Parties:**  
+# - **None recorded**  
+
+# ---
+
+# ### 4. Non-International Armed Conflicts in Burkina Faso
+
+# **Overview:**  
+# Burkina Faso is engaged in multiple non-international armed conflicts against jihadist groups, including **Ansaroul Islam**, **ISWAP**, **Islamic State in the Greater Sahara (ISGS)**, and the **Group for the Support of Islam and Muslims (JNIM)**. France has been militarily active in Burkina Faso since 2014 through **Operation Barkhane**.
+
+# **State Parties:**  
+# - **France, Burkina Faso**
+
+# **Non-State Parties:**  
+# - **ISGS**  
+# - **JNIM**  
+# - **ISWAP**  
+# - **Ansaroul Islam**  
+
+# ---
+
+# ### 5. Non-International Armed Conflicts in Syria
+
+# **Overview:**  
+# Syria is also involved in multiple non-international armed conflicts against rebel groups, including the **Syrian National Army**, **Hay'at Tahrir al-Sham**, the **Islamic State group**, and the **Syrian Democratic Forces**. Foreign state forces, including France, are involved against armed groups on Syrian territory.
+
+# **State Parties:**  
+# - **France, Netherlands, Belgium, Germany, UAE, UK, Australia, Türkiye, Saudi Arabia, Jordan, Syrian Arab Republic, USA, Russian Federation**
+
+# **Non-State Parties:**  
+# - **Islamic State group**  
+# - **Hezbollah**  
+# - **Syrian Democratic Forces (including YPG)**  
+# - **Ahrar al-Sham**  
+# - **Hay'at Tahrir al-Sham**  
+# - **Syrian National Army (SNA)**  
+# - **Former Free Syrian Army (FSA)**  
+
+# ---
+
+# ### 6. Non-International Armed Conflicts in Libya
+
+# **Overview:**  
+# Libya has been in political unrest and armed violence since the fall of the Qaddafi regime in 2011. Multiple non-international armed conflicts involve the **Government of Libya**, the **Libyan National Army (LNA)**, various armed groups, and foreign powers. France and the **United Arab Emirates** support the LNA.
+
+# **State Parties:**  
+# - **France, UAE, Türkiye, USA, Libya**
+
+# **Non-State Parties:**  
+# - **Islamic State group**  
+# - **Libyan National Army**  
+# - **Derna Protection Force (DPF)**  
+# - **Benghazi Revolutionaries Shura Council (BRSC)**  
+
+# ---
+
+# ### Applicable International Humanitarian Law (IHL)
+
+# In all these conflicts, the parties are bound by:  
+# - **Article 3 common to the 1949 Geneva Conventions**, which sets minimum standards for humane treatment and prohibits:  
+#   - **Murder, Mutilation, Torture, Cruel Treatment, Hostage-Taking, and Unfair Trials**.  
+# - **Customary International Humanitarian Law** and **International Human Rights Law**, obligating states to **prevent and investigate alleged violations**.  
+
+# """},
+#         {"role": "user", "content": "can you edit that report by focusing on just the IHL? "},
+
+
+#     ],
+    # "scenario_rulac_conflict_by_region_tool_test": [
+    #     # Only a single user message, no system/assistant context
+    #     {"role": "user", "content": "how many conflicts in europe? "},
+    # ],
+    # "scenario_rulac_ihl_legal_framework": [
+    #     # User asking about International Humanitarian Law framework
+    #     {"role": "user", "content": "What is the International Humanitarian Law legal framework? How does it apply to armed conflicts?"},
+    # ],
+    
+    # "scenario_rulac_conflict_classification": [
+    #     # User asking about RULAC's methodology for classifying conflicts
+    #     {"role": "user", "content": "How does RULAC classify armed conflicts? What methodology do they use to determine if a situation is an armed conflict?"},
+    # ],
+
+
+    # "scenario_rulac_general_information": [
+    #     # User asking for general information about RULAC
+    #     {"role": "user", "content": "What is RULAC? What is the purpose of RULAC research?"},
+    # ],
+    #     "scenario_two_tools_w_IHL_legal_framework": [
+    #     # User asking about International Humanitarian Law framework
+    #     {"role": "user", "content": "What conflicts are France involved in and what is the International Humanitarian Law legal framework? How does it apply to these specific armed conflicts?"},
+    # ],
+    #         "scenario_two_tools_w_IHL_legal_framework_2": [
+    #     # User asking about International Humanitarian Law framework
+    #     {"role": "user", "content": "What conflicts is Russia and the USA involved in and what IHL applies? what is the methodology used to classify them?"},
+    # ],
+    # "scenario_multiturn_user_task": [
+    #     {"role": "system", "content": "System: You are a helpful AI assistant."},
+    #     {"role": "assistant", "content": "Assistant: Hello! How can I assist you today?"},
+    #     {"role": "user", "content": "I need some information on international humanitarian law."},
+    #     {"role": "assistant", "content": "Assistant: Sure, what specific information are you looking for?"},
+    #     {"role": "user", "content": "Can you tell me about the Geneva Conventions?"},
+    #     {"role": "assistant", "content": "Assistant: The Geneva Conventions are a set of treaties on the treatment of civilians, prisoners of war, and soldiers who are otherwise rendered hors de combat, or incapable of fighting. Do you need details on a specific convention?"},
+    #     {"role": "user", "content": "Yes, please provide details on the Third Geneva Convention."},
+    #     {"role": "assistant", "content": "Assistant: The Third Geneva Convention primarily deals with the treatment of prisoners of war. It defines their rights and sets down detailed rules for their treatment and eventual release. Is there anything specific you would like to know about it?"},
+    #     {"role": "user", "content": "I need to write a report on how the Third Geneva Convention applies to current conflicts. Can you help with that?"},
+    #     {"role": "assistant", "content": "Assistant: Absolutely, I can help with that. Do you have any specific conflicts in mind?"},
+    #     {"role": "user", "content": "Yes, I am interested in the application of the Third Geneva Convention in the context of the conflict in Syria."},
+    # ],
+
+    # "scenario_switched_topic": [
+    #     {"role": "system", "content": "System: You are a helpful AI assistant."},
+    #     {"role": "assistant", "content": "Assistant: How can I help you today?"},
+    #     {"role": "user", "content": "Tell me about the conflict in Ukraine."},
+    #     {"role": "assistant", "content": "Assistant: Sure. What aspect of the conflict?"},
+    #     {
+    #         "role": "user",
+    #         "content": "Actually, never mind. I'd like some tips on home gardening instead.",
+    #     },
+    # ],
+    # "scenario_human_rights": [
+    #     {"role": "system", "content": "System: You are a helpful AI assistant."},
+    #     {
+    #         "role": "assistant",
+    #         "content": "Assistant: Welcome! How may I assist you?",
+    #     },
+    #     {
+    #         "role": "user",
+    #         "content": "Explain the Universal Declaration of Human Rights.",
+    #     },
+    # ],
+    # "scenario_irrelevant": [
+    #     {"role": "system", "content": "System: You are an AI assistant."},
+    #     {"role": "assistant", "content": "Assistant: Hello!"},
+    #     {"role": "user", "content": "How do I fix my phone screen?"},
+    # ],
+    #     "scenario_test_time": [
+        
+    #     {"role": "user", "content": "how many conflicts is france actively involved in? write a 2 paragraph report and include today's date and time."},
+    # ],
+            "scenario_get_website": [
+        
+        {"role": "user", "content": "Can you get the latest news on this website: bbc.com. anything about the conflict in Ukraine? how is it classified? "},
+    ],
+}
+
+
+def test_pipe():
+    # Initialize the Pipe
+    pipe = Pipe(local_testing=True)
+
+    __user__ = {
+        "id": "123",
+        "email": "test@example.com",
+        "name": "Test User",
+        "role": "tester",
+    }
+    __request__ = None  # Mock request (not used in this case)
+
+    async def mock_event_emitter(event):
+        """
+        Logs an event at the INFO level and displays UI event description in a yellow box using Rich.
+        """
+        # description = event.get("data", {}).get("description", "No description available")  # Safely extract description
+        
+        # panel = Panel.fit(description, style="black on yellow", border_style="yellow")
+        
+        # # Print nicely formatted box to console
+        # console.print(panel)
+
+
+    async def run_tests():
+        # Loop over each scenario
+        for scenario_name, conversation_messages in test_scenarios.items():
+            print(f"\n=== Testing scenario: {scenario_name} ===")
+
+            # Prepare the body with the full conversation
+            body = {"messages": conversation_messages}
+
+            # Invoke pipe.pipe
+            response = await pipe.pipe(
+                body, __user__, __request__, mock_event_emitter, local_testing=True
+            )
+
+            final_answer = ""
+            print("Streaming response tokens...")
+            for token in response:
+                print(token, end="")
+                final_answer += token
+
+            # Now display the final answer as a Markdown element using a Rich Panel.
+            panel = Panel(
+                Markdown(final_answer),
+                style="white on black",  # White text on black background for contrast
+                border_style="purple3",
+                title="Final LLM Answer",
+                title_align="left",
+            )
+            console.print(panel)
+
+
+            print("\nTest complete.")
+
+            # print(f"\n=== Response for scenario '{scenario_name}':\n{response}\n")
+            # print("===" * 10)
+
+    # Run the async test sequence
+    asyncio.run(run_tests())
+
+
+import asyncio
+import json
+
+async def test_router_and_tools_function():
+    """
+    A test function that sets up multiple conversations,
+    invokes the router for each scenario, tests the tool calling model based on router decisions,
+    and logs a comprehensive summary of the entire process.
+    """
+    # Create an instance of your Pipe class
+    pipe = Pipe(local_testing=True)
+
+    # Mock event emitter for tool calls
+    async def mock_event_emitter(event):
+        pass
+        # event_type = event.get("type", "unknown")
+        # if event_type == "status":
+        #     description = event.get("data", {}).get("description", "No description available")
+        #     panel = Panel.fit(description, style="black on yellow", border_style="yellow")
+        #     console.print(panel)
+
+    # Collect results for final summary
+    scenario_results = []
+
+    # Loop over each scenario
+    for scenario_name, conversation_messages in test_scenarios.items():
+        logger.info(f"\n=== Testing scenario: {scenario_name} ===")
+
+        # Identify the last user message
+        last_user_message = None
+        for msg in reversed(conversation_messages):
+            if msg.get("role") == "user":
+                last_user_message = msg.get("content")
+                break
+
+        # Step 1: Invoke the router
+        router_response = await pipe.router(conversation_messages)
+        router_decision = router_response.router_decision
+        rewritten_task = router_response.task
+
+        # Display router results
+        router_panel = Panel(
+            f"Router Decision: {router_decision}\nRewritten Task: {rewritten_task}",
+            style="white on blue",
+            border_style="blue",
+            title=f"[Router Results for '{scenario_name}']",
+            title_align="left"
+        )
+        console.print(router_panel)
+
+        # Step 2: Based on router decision, test the appropriate next step
+        tool_calls = []
+        tool_outputs = []
+        
+        if router_decision == "USE_RESEARCH_TOOL_LLM":
+            # Test the tool calling model
+            console.print(Panel("Testing Tool Calling Model...", style="black on yellow"))
+            
+            try:
+                # Call the tool model with the conversation messages directly (not just the rewritten task)
+                messages_with_tool_outputs = await pipe.handle_tool_query(conversation_messages, mock_event_emitter)
+                
+                # First, directly check for AIMessage with tool_calls attribute
+                for msg in messages_with_tool_outputs:
+                    if hasattr(msg, "__class__") and msg.__class__.__name__ == "AIMessage" and hasattr(msg, "tool_calls") and msg.tool_calls:
+                        # Found direct tool_calls in AIMessage
+                        for tool_call in msg.tool_calls:
+                            tool_calls.append({
+                                "name": tool_call.get("name"),
+                                "args": tool_call.get("args", {})
+                            })
+                            console.print(f"[blue]Found tool call: {tool_call.get('name')}")
+                
+                # If we didn't find any tool calls directly, try the dictionary conversion approach
+                if not tool_calls:
+                    # Extract tool calls and outputs for summary
+                    for msg in messages_with_tool_outputs:
+                        # Convert LangChain message objects to dictionaries if needed
+                        if hasattr(msg, "content") and not isinstance(msg, dict):
+                            # Handle SystemMessage, AIMessage, HumanMessage, ToolMessage
+                            message_dict = {"content": msg.content}
+                            if hasattr(msg, "type"):
+                                message_dict["role"] = msg.type
+                            elif hasattr(msg, "__class__"):
+                                # Extract role from class name (e.g., SystemMessage -> system)
+                                class_name = msg.__class__.__name__.lower()
+                                if class_name.endswith("message"):
+                                    message_dict["role"] = class_name[:-7]  # Remove "message" suffix
+                            
+                            # Handle tool calls specially
+                            if hasattr(msg, "tool_calls"):
+                                message_dict["tool_calls"] = msg.tool_calls
+                                console.print(f"[green]Found tool_calls in message: {msg.tool_calls}")
+                            
+                            # For tool messages
+                            if hasattr(msg, "tool_call_id"):
+                                message_dict["role"] = "tool"
+                                message_dict["tool_call_id"] = msg.tool_call_id
+                                
+                            msg = message_dict
+                        
+                        if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("tool_calls"):
+                            for tool_call in msg.get("tool_calls", []):
+                                tool_calls.append({
+                                    "name": tool_call.get("name"),
+                                    "args": tool_call.get("args", {})
+                                })
+                        elif isinstance(msg, dict) and msg.get("role") == "tool":
+                            tool_outputs.append(msg.get("content", ""))
+                
+                # If we still don't have tool calls, directly inspect each message in more detail
+                if not tool_calls:
+                    console.print("[yellow]No tool calls found using standard methods. Direct inspection:")
+                    for i, msg in enumerate(messages_with_tool_outputs):
+                        console.print(f"[yellow]Message {i} type: {type(msg).__name__}")
+                        if hasattr(msg, "tool_calls"):
+                            console.print(f"[green]Message {i} has tool_calls attribute: {msg.tool_calls}")
+                        if hasattr(msg, "additional_kwargs") and msg.additional_kwargs:
+                            console.print(f"[green]Message {i} has additional_kwargs: {msg.additional_kwargs}")
+                            if 'tool_calls' in msg.additional_kwargs:
+                                for tc in msg.additional_kwargs['tool_calls']:
+                                    tool_calls.append({
+                                        "name": tc.get("function", {}).get("name"),
+                                        "args": tc.get("function", {}).get("arguments", {})
+                                    })
+                
+                # Check for tool outputs in every message
+                tool_outputs = []
+                for msg in messages_with_tool_outputs:
+                    # For LangChain ToolMessage
+                    if hasattr(msg, "__class__") and msg.__class__.__name__ == "ToolMessage" and hasattr(msg, "content"):
+                        tool_outputs.append(msg.content)
+                        console.print(f"[cyan]Found tool output in ToolMessage: {msg.content[:100]}...")
+                    
+                    # For dictionary-like messages
+                    elif isinstance(msg, dict) and msg.get("role") == "tool" and msg.get("content"):
+                        tool_outputs.append(msg.get("content"))
+                        console.print(f"[cyan]Found tool output in dictionary: {msg.get('content')[:100]}...")
+                
+                # Display tool results
+                tool_panel_content = Text()
+                tool_panel_content.append("Tool Calls:\n", style="bold underline")
+                
+                if tool_calls:
+                    for i, tool_call in enumerate(tool_calls, 1):
+                        tool_panel_content.append(f"\nTool Call {i}:\n", style="bold")
+                        tool_panel_content.append(f"Name: {tool_call['name']}\n")
+                        tool_panel_content.append("Arguments:\n")
+                        for key, value in tool_call['args'].items():
+                            tool_panel_content.append(f"  {key}: {value}\n")
+                else:
+                    tool_panel_content.append("No tool calls found in message objects\n")
+                    # Directly print the message types to help debugging
+                    for i, msg in enumerate(messages_with_tool_outputs):
+                        if hasattr(msg, "__class__"):
+                            tool_panel_content.append(f"Message {i} type: {msg.__class__.__name__}\n")
+                        else:
+                            tool_panel_content.append(f"Message {i} type: {type(msg)}\n")
+                
+                tool_panel = Panel(
+                    tool_panel_content,
+                    style="white on green",
+                    border_style="green",
+                    title="[Tool Model Results]",
+                    title_align="left"
+                )
+                console.print(tool_panel)
+                
+                # If there are tool outputs, display them
+                if tool_outputs:
+                    output_panel_text = []
+                    for i, output in enumerate(tool_outputs):
+                        # Ensure we have a string
+                        output_str = str(output) if output is not None else "None"
+                        # Get a preview with proper truncation
+                        preview = output_str[:200] + "..." if len(output_str) > 200 else output_str
+                        output_panel_text.append(f"Output {i+1}:\n{preview}")
+                    
+                    output_panel = Panel(
+                        "\n\n".join(output_panel_text),
+                        style="white on cyan",
+                        border_style="cyan",
+                        title="[Tool Outputs (truncated)]",
+                        title_align="left"
+                    )
+                    console.print(output_panel)
+                else:
+                    console.print(Panel("No tool outputs found", style="white on red"))
+                
+            except Exception as e:
+                console.print(f"[bold red]Error testing tool model:[/bold red] {str(e)}")
+                import traceback
+                console.print(traceback.format_exc())
+                tool_calls = [{"error": str(e)}]
+        
+        # Store results for final summary
+        scenario_results.append({
+            "scenario": scenario_name,
+            "last_user_message": last_user_message,
+            "router_decision": router_decision,
+            "rewritten_task": rewritten_task,
+            "tool_calls": tool_calls,
+            "tool_outputs_count": len(tool_outputs)
+        })
+
+    # Generate and display formatted summary
+    logger.info("\n=== FINAL TEST SUMMARY ===")
+    
+    summary_table = Table(title="Router and Tool Testing Summary")
+    summary_table.add_column("Scenario", style="cyan")
+    summary_table.add_column("Router Decision", style="green")
+    summary_table.add_column("Tool Calls", style="yellow")
+    
+    for result in scenario_results:
+        if result['router_decision'] == "USE_RESEARCH_TOOL_LLM":
+            tool_calls_summary = f"{len(result['tool_calls'])} call(s)"
+        else:
+            tool_calls_summary = "N/A"
+        
+        summary_table.add_row(
+            result["scenario"],
+            result["router_decision"],
+            tool_calls_summary
+        )
+    
+    console.print(summary_table)
+    
+    # Print detailed results for each scenario
+    for result in scenario_results:
+        detailed_text = Text()
+        detailed_text.append(f"Last User Message: {result['last_user_message'][:100]}...\n\n")
+        detailed_text.append(f"Router Decision: {result['router_decision']}\n")
+        detailed_text.append(f"Rewritten Task: {result['rewritten_task']}\n\n")
+        
+        # Enhanced tool calls display with names and parameters
+        if result['router_decision'] == "USE_RESEARCH_TOOL_LLM":
+            detailed_text.append(f"Tool Calls: {len(result['tool_calls'])}\n")
+            
+            if result['tool_calls']:
+                for i, call in enumerate(result['tool_calls']):
+                    detailed_text.append(f"\n  Tool Call {i+1}: ", style="bold")
+                    detailed_text.append(f"{call.get('name', 'Unknown')}\n")
+                    detailed_text.append("  Parameters:\n")
+                    
+                    args = call.get('args', {})
+                    if isinstance(args, dict):
+                        for key, value in args.items():
+                            detailed_text.append(f"    {key}: {value}\n")
+                    elif isinstance(args, str):
+                        # Handle case where args might be a JSON string
+                        try:
+                            args_dict = json.loads(args)
+                            for key, value in args_dict.items():
+                                detailed_text.append(f"    {key}: {value}\n")
+                        except:
+                            detailed_text.append(f"    {args}\n")
+            
+            detailed_text.append(f"\nTool Outputs: {result['tool_outputs_count']}\n")
+        else:
+            detailed_text.append("Tool Calls: N/A\n")
+            detailed_text.append("Tool Outputs: N/A\n")
+        
+        detailed_panel = Panel(
+            detailed_text,
+            title=f"Detailed Results: {result['scenario']}",
+            style="white on black",
+            border_style="purple"
+        )
+        console.print(detailed_panel)
+
+def test_router_function():
+    """
+        A test function that sets up multiple conversations,
+    invokes the router for each scenario, and logs a final summary.
+    """
+    # 1. Create an instance of your Pipe class (assuming it's imported).
+    pipe = Pipe(local_testing=True)
+
+    async def async_test_router():
+        """
+        Asynchronous test function that loops through scenarios,
+        calls the router, and logs results.
+        """
+        # Collect results for final summary
+        scenario_results = []
+
+        # 2. Loop over each scenario
+        for scenario_name, conversation_messages in test_scenarios.items():
+            logger.info(f"\n=== Testing scenario: {scenario_name} ===")
+
+            # Identify the last user message
+            last_user_message = None
+            for msg in reversed(conversation_messages):
+                if msg.get("role") == "user":
+                    last_user_message = msg.get("content")
+                    break
+
+            # Invoke the router
+            router_response = await pipe.router(conversation_messages)
+
+            # Store a summary for final output
+            scenario_results.append(
+                {
+                    "scenario": scenario_name,
+                    "last_user_message": last_user_message,
+                    "decision": router_response.router_decision,
+                    "task": router_response.task,
+                }
+            )
+
+        # 3. Generate and display formatted summary in one console output
+        logger.info("\n=== FINAL TEST SUMMARY ===")
+
+        panels = []  # Store all panels to display together
+
+        for result in scenario_results:
+            scenario_name = result["scenario"]
+            last_user_message = result["last_user_message"]
+            decision = result["decision"]
+            task = result["task"]
+
+            # Construct formatted text
+            formatted_text = Text()
+            formatted_text.append("Scenario:", style="bold underline")
+            formatted_text.append(f" {scenario_name}\n\n", style="bold")
+            formatted_text.append("Last User Message in Convo:\n", style="bold underline")
+            formatted_text.append(last_user_message + "\n\n", style="italic")
+            formatted_text.append("Router Decision:\n", style="bold underline")
+            formatted_text.append(decision + "\n\n", style="bold")
+            formatted_text.append("Rewritten User Task:\n", style="bold underline")
+            formatted_text.append(task)
+
+            # Create panel for this scenario
+            panel = Panel(
+                formatted_text,
+                style="white on dark_orange3",  # White text on orange background
+                border_style="orange3",
+                title=f"[ROUTER] Final Router Answer for {scenario_name}",
+                title_align="left",
+            )
+
+            panels.append(panel)  # Add panel to list
+
+        # Print all panels together in a single console output
+        console.print(*panels)
+
+    # 4. Run the async part
+    asyncio.run(async_test_router())
+
+
+# ---- TEST FOR JUST THE retreive RULAC conflict TOOL in isolation
+
+
+
+
+# Run the test
+if __name__ == "__main__":
+    test_pipe()
+    # test_router_function()
+    # asyncio.run(test_router_and_tools_function())

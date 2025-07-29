@@ -2,3 +2,12 @@
 pipelines/
 tests/__pycache__/
 __pycache__/
+temp_test_data/
+tests/test_outputs/
+formatted_mistral_data_V3.jsonl
+formatted_mistral_data.jsonl
+formatted_mistral_train_utf8_fixed.jsonl
+formatted_mistral_train_V3.jsonl
+formatted_mistral_val_V3.jsonl
+formatted_unsloth_train_V3.jsonl
+formatted_unsloth_val_V3.jsonl

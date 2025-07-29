@@ -1,0 +1,257 @@
+    Below is a concise rundown of the *common structural and semantic patterns* across all your Cypher query examples. 
+
+    ---
+
+    ## 1. Overall Query Flow
+
+    Each query generally follows a **multi-step pattern** that can be summarized like this:
+
+    1. **Define Parameters**  
+    - A top-level `WITH` block sets one or more *dynamic parameters* (e.g. country code, conflict type, organization name).  
+    - Example:
+        ```cypher
+        WITH "250" AS target_m49_code,
+            "France" AS target_actor_name
+        ```
+    2. **Match / Optional Match the Core Nodes**  
+    - Use `OPTIONAL MATCH` for key data (StateActor, Conflict, Classification, Actors, Country, GeoRegion, Organization, etc.), ensuring the query always returns a row even if nothing matches.  
+    - This “soft match” approach lets you gracefully handle “no data found” scenarios by preserving a single row but having `null` or empty lists for missing items.
+    3. **Aggregate & Collect**  
+    - Collect relevant nodes/relationships into arrays or single values, often using `COLLECT(DISTINCT ...)`.  
+    - Example:  
+        ```cypher
+        OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]->(sa)
+        WITH COLLECT(DISTINCT c) AS conflicts
+        ```
+    4. **Compute Summary Values**  
+    - Often count how many conflicts exist (using `SIZE(...)`) or tally how many conflicts match each classification (IAC, NIAC, Occupation).  
+    - Example:
+        ```cypher
+        WITH conflicts,
+            SIZE(conflicts) AS total_conflicts
+        ```
+    5. **Build a `conflict_details` List**  
+    - For each conflict, construct a map/object that includes the standard fields:
+        - `conflict_name`
+        - `conflict_classification`
+        - `conflict_overview`
+        - `applicable_ihl_law`
+        - `conflict_citation`
+        - `state_parties`
+        - `non_state_parties`
+    - Typically done via a list comprehension, e.g.
+        ```cypher
+        [conf IN conflicts |
+        {
+            conflict_name: COALESCE(conf.name, "Unknown"),
+            conflict_classification: ...,
+            ...
+        }
+        ] AS conflict_details
+        ```
+    6. **Build a `summary` String**  
+    - A dynamic, human-readable string describes the result: total conflicts, breakdown by classification, or comparisons between states/regions.  
+    - Often uses `CASE ... WHEN ... THEN ... ELSE ... END` to handle “no data vs. data” logic.
+    7. **Return a Single Structured Object**  
+    - Always returned as:
+        ```cypher
+        RETURN {
+        summary: <some string>,
+        conflict_details: <list of conflict detail maps>
+        } AS RULAC_research
+        ```
+    - The entire query returns exactly one row with one object named `RULAC_research`.
+
+    ---
+
+    ## 2. Common Thematic Patterns
+
+    1. **Parameter Setup Block**  
+    - Nearly every example starts with a “Setup our parameters” block (e.g. a `WITH` for country code, conflict type, or organization name).  
+    - Use consistent naming like `target_m49_code`, `target_actor_name`, `target_conflict_type`, etc.
+
+    2. **Using `OPTIONAL MATCH` (instead of `MATCH`)**  
+    - Ensures that if no data is found for a partial step, the query does *not* lose all rows. Instead, the related variable is null or an empty list.  
+    - This prevents the query from returning zero rows in “no data found” scenarios.
+
+    3. **Collecting Nodes and Building Summary**  
+    - After gathering data, there's almost always a “group by” step with `COLLECT(DISTINCT ...)`.  
+    - Then the query uses `WITH` blocks to do a “per-entity” or “per-country” or “per-conflict” summarization (counting, listing, building maps).
+
+    4. **Classification Breakdown**  
+    - IAC, NIAC, and “Military Occupation” commonly appear.  
+    - Many queries compute:
+        - `total_IAC`, `total_NIAC`, `total_Military_Occupation`
+        - The conflict names for each classification
+        - A final summary that references each classification if present.
+
+    5. **Final `CASE WHEN ...` for Summaries**  
+    - A signature pattern:  
+        ```cypher
+        CASE
+        WHEN total_conflicts = 0 THEN "... no recorded conflicts ..."
+        ELSE "... X conflicts with breakdown: IAC = Y, NIAC = Z ..."
+        END AS summary_text
+        ```
+
+    6. **Returning the Object as `RULAC_research`**  
+    - You consistently finalize the query with:
+        ```cypher
+        RETURN {
+        summary: <someText>,
+        conflict_details: <someList>
+        } AS RULAC_research
+        ```
+
+    ---
+
+    ## 3. Patterns by Use Case
+
+    From your examples, you can group them by *function type*:  
+
+    1. **Conflict Retrieval Based on State Actor Involvement**  
+    - Example “What conflicts is France involved in?”  
+    - Steps:
+        1. `OPTIONAL MATCH (sa:StateActor {UN_M49Code: "250"})`
+        2. `OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]->(sa)`
+        3. Classification logic + building summary by classification
+        4. Return summary + `conflict_details`
+
+    2. **Filtering by Conflict Type**  
+    - Example “Military Occupations involving X” or “Which NIACs is country Y in?”  
+    - Added `WHERE ct.type = <target_conflict_type>` after matching `:IS_CLASSIFIED_AS_CONFLICT_TYPE`.
+
+    3. **Conflict Retrieval Based on the Place / Region**  
+    - Example “What conflicts are taking place in South Africa?”  
+    - `(:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(:Country {UN_M49Code: ...})`  
+    - Summaries that break down IAC/NIAC/Occupations similarly.
+
+    4. **Manual Region Grouping**  
+    - E.g., Horn of Africa, Sahel, Great Lakes, etc.  
+    - Typically starts with:  
+        ```cypher
+        WITH ["xxx", "yyy", "zzz"] AS target_country_codes
+        OPTIONAL MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(co:Country)
+        WHERE co.UN_M49Code IN target_country_codes
+        ```
+    - Or for *state actors* from that region:  
+        ```cypher
+        OPTIONAL MATCH (sa:StateActor)
+        WHERE sa.UN_M49Code IN target_country_codes
+        OPTIONAL MATCH (sa)-[:IS_PARTY_TO_CONFLICT]->(c:Conflict)
+        ```
+    - Then a similar classification + summary procedure.
+
+    5. **Organization or Political/Economic Bloc**  
+    - E.g. “European Union,” “African Union,” “NATO,” etc.  
+    - Pattern:  
+        1. `MATCH (org:Organization {name: "European Union"})`  
+        2. `OPTIONAL MATCH (sa:StateActor)-[:IS_MEMBER]->(org)`  
+        3. Then same “retrieve conflicts + classification + summary.”
+
+    6. **Comparisons**  
+    - Many examples compare two states, two organizations, or two regions.  
+    - Common approach:
+        1. `WITH ["804", "682"] AS target_m49_codes` (for 2 countries)  
+        2. *UNWIND* them or MATCH them individually.  
+        3. For each, collect conflict data.  
+        4. Summarize each side’s total.  
+        5. Final `CASE WHEN` to handle “tie,” “one missing,” or “one bigger.”  
+    - Return a single `RULAC_research` with a combined summary.
+
+    7. **Ranking or Top-N Queries**  
+    - E.g. “Which countries are party to the most conflicts?”  
+    - Pattern:
+        1. `MATCH (sa:StateActor)-[:IS_PARTY_TO_CONFLICT]->(c:Conflict)`  
+        2. Aggregate and `ORDER BY COUNT(*) DESC`  
+        3. Possibly `LIMIT 10`.  
+        4. Summaries typically say “the top 10 countries are...”
+
+    8. **Non-State Actors**  
+    - E.g. “What conflicts involve a certain NonStateActor (by name or alias)?”  
+    - Matching typically includes:
+        ```cypher
+        WHERE any(alias IN actor.aliases WHERE toLower(alias) CONTAINS toLower(name_alias))
+            OR toLower(actor.name) CONTAINS toLower(...)
+        ```
+    - Then the same “collect, classify, summarize” approach.
+
+    ---
+
+    ## 4. Implementation Details Worth Documenting
+
+    1. **Always Return Exactly One Row**  
+    - Use `OPTIONAL MATCH` + `CASE WHEN` so the final output is a single JSON object, even if no data is found.
+
+    2. **Consistent JSON Schema**  
+    - Return object has `summary` (string) and `conflict_details` (array of maps).  
+    - The conflict details map consistently has these fields:
+        - `conflict_name`
+        - `conflict_classification`
+        - `conflict_overview`
+        - `applicable_ihl_law`
+        - `conflict_citation`
+        - `state_parties`
+        - `non_state_parties`
+
+    3. **Use of `COALESCE(...)`**  
+    - Commonly used on properties (e.g., `COALESCE(conf.name, "Unknown")`) to handle missing data.
+
+    4. **String Assembly**  
+    - Summaries rely heavily on `apoc.text.join(...)` and `toString(...)`.
+
+    5. **Classification Checking**  
+    - Typically done via separate `OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(:ConflictType {type: ...})`.
+
+    6. **Never Hard-Code Unused Node/Relationship Names**  
+    - “Strict Schema Adherence” instructions: use only the relationships `IS_TAKING_PLACE_IN_COUNTRY`, `IS_PARTY_TO_CONFLICT`, `IS_CLASSIFIED_AS_CONFLICT_TYPE`, `IS_MEMBER`, etc. as they appear in the official schema.
+
+    7. **Avoid Matching State Actor by Name**  
+    - Always match by `UN_M49Code` for states. Non-state actors can be matched by name/aliases with `toLower(...) contains toLower(...)`.
+
+    ---
+
+    ## 5. “General Rules”
+
+
+    1. **Always Return `RULAC_research`**  
+    - Structure:  
+        ```cypher
+        RETURN {
+        summary: <string>,
+        conflict_details: <list of maps>
+        } AS RULAC_research
+        ```
+
+    2. **Use `OPTIONAL MATCH` for Each Step**  
+    - Ensures query returns a fallback row when no match is found.  
+
+    3. **Define Key Parameters in a Single `WITH`**  
+    - E.g., `WITH "643" AS target_m49_code, "Russia" AS target_actor_name`.  
+
+    4. **Collect, Then Summarize**  
+    - Use `COLLECT(DISTINCT ...)` to gather conflicts, parties, classification nodes, etc.  
+    - Derive numeric stats (count, sizes).  
+
+    5. **Construct `conflict_details`**  
+    - Use a list comprehension that returns a standard map schema:
+        ```cypher
+        [conf IN conflicts |
+        {
+            conflict_name: COALESCE(conf.name, ...),
+            ...
+        }
+        ]
+        ```
+
+    6. **Build a Conditional `summary` String**  
+    - Rely on `CASE WHEN total_conflicts = 0 THEN ... ELSE ... END`.  
+    - Optionally, break down IAC/NIAC/Occupation if relevant.  
+
+    7. **Adhere to the Provided Schema**  
+    - Use only the labels: `Conflict`, `StateActor`, `NonStateActor`, `Country`, `GeoRegion`, `Organization`.  
+    - Use only the relationships: `IS_PARTY_TO_CONFLICT`, `IS_TAKING_PLACE_IN_COUNTRY`, `IS_CLASSIFIED_AS_CONFLICT_TYPE`, `BELONGS_TO`, `IS_MEMBER`.  
+    - Use known properties like `UN_M49Code`, `name`, `overview`, `aliases`, `type`, etc.  
+
+    8. **Comparison / Ranking**  
+    - If comparing or ranking, gather data separately for each entity, then wrap in a final `CASE WHEN ...` for output.  

@@ -1,0 +1,1388 @@
+from typing import List, Dict, Any, Union, Optional, TypedDict, Literal, Tuple
+from langchain_core.tools import tool, BaseTool
+from rich.console import Console
+from rich.panel import Panel
+from rich.markdown import Markdown
+import logging
+import os
+import coloredlogs
+import requests
+from bs4 import BeautifulSoup
+import re
+from urllib.parse import urlparse, quote, urlunparse
+import pprint
+import json
+from datetime import datetime
+from fake_useragent import UserAgent
+import random
+import time
+from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage
+import glob
+
+# Import standardized functions from RULAC_tools
+from tools.RULAC_tools import (
+    Citation, 
+    RULAC_TOOL_RESULT,
+    create_standard_citation, 
+    format_standard_tool_result,
+    standardized_tool_test,
+    display_formatted_results
+)
+
+# Global configuration values
+tool_specific_values = {
+    "BRAVE_SEARCH_API_BASE_URL": "https://api.search.brave.com/res/v1/web/search",
+    "BRAVE_SEARCH_NEWS_API_BASE_URL": "https://api.search.brave.com/res/v1/news/search",
+    "BRAVE_SEARCH_API_KEY": "",
+    "PAGE_CONTENT_WORDS_LIMIT": 4000,
+}
+
+# Initialize fake user agent
+ua = UserAgent()
+
+# Common headers that we'll rotate through
+COMMON_HEADERS = [
+    {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": tool_specific_values["BRAVE_SEARCH_API_KEY"]
+    }
+]
+
+def get_request_headers(custom_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """
+    Generate headers for HTTP requests, optionally merging with custom headers.
+    
+    Args:
+        custom_headers: Optional dictionary of custom headers to merge with defaults
+        
+    Returns:
+        Dictionary of headers to use for the request
+    """
+    # Get a random user agent
+    user_agent = ua.random
+    logger.debug(f"Generated User-Agent: {user_agent}")
+    
+    # Get a random set of common headers
+    base_headers = random.choice(COMMON_HEADERS).copy()
+    
+    # Add the random user agent
+    base_headers["User-Agent"] = user_agent
+    
+    # Merge with custom headers if provided
+    if custom_headers:
+        base_headers.update(custom_headers)
+    
+    return base_headers
+
+# Initialize Rich Console for formatted output
+console = Console()
+
+# Configure logging
+logger = logging.getLogger("Beacon.HRW")
+coloredlogs.install(
+    logger=logger,
+    level="DEBUG",
+    isatty=True,
+    fmt="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+# Define log styles for rich console output
+LOG_STYLES = {
+    "info": {"style": "black on yellow", "border_style": "yellow"},
+    "success": {"style": "black on green", "border_style": "green"},
+    "error": {"style": "white on red", "border_style": "red"},
+    "title": {"style": "bold white on green", "border_style": "green"}
+}
+
+def log(message, level="info", as_panel=True):
+    """
+    Log a message with consistent styling based on level.
+    
+    Args:
+        message: The message to log
+        level: The log level (info, success, error, title)
+        as_panel: Whether to format as a panel or simple text
+    """
+    style = LOG_STYLES.get(level, LOG_STYLES["info"])
+    
+    if as_panel:
+        console.print(Panel(message, **style))
+    else:
+        console.print(message, style=style["style"])
+
+async def async_scrape_BBC_news(urls: List[str]) -> List[str]:
+    """
+    Asynchronously scrape multiple URLs using requests.
+    
+    Args:
+        urls: List of URLs to scrape
+        
+    Returns:
+        List of article text content
+    """
+    # Create temp directory if it doesn't exist
+    temp_dir = "temp_test_data"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Initialize results
+    article_texts = []
+    
+    # Process each URL
+    for url in urls:
+        try:
+            logger.debug(f"Scraping URL: {url}")
+                
+            # Generate headers for this request
+            headers = get_request_headers()
+                
+            # Fetch the page content
+            response = requests.get(url, headers=headers, timeout=120)
+            response.raise_for_status()
+            
+            # Parse the HTML
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Save raw HTML and soup data for debugging
+            # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # url_safe = re.sub(r'[^a-zA-Z0-9]', '_', url)
+            # filename = os.path.join(temp_dir, f"BBC_scrape_{url_safe}_{timestamp}")
+            
+            
+            # Look for the main article content
+            article_content = None
+            
+            # First try to find the main article container
+            article_content = soup.find('article')
+
+            # Save article content, to iterate on in order to clean up the content  
+            # with open(f"{filename}_raw_article_content.html", "w", encoding="utf-8") as f:
+            #     f.write(article_content.prettify())
+
+
+
+            if article_content:
+                # Remove all script and style elements
+                for element in article_content.find_all(['script', 'style']):
+                    element.decompose()
+                
+                # Remove all navigation elements
+                for nav in article_content.find_all('nav'):
+                    element.decompose()
+                
+                # Remove all button elements (often used for sharing, etc)
+                for button in article_content.find_all('button'):
+                    button.decompose()
+                
+                # Remove all ul elements (typically contains related links)
+                for element in article_content.find_all('ul'):
+                    element.decompose()
+                
+                # Remove links blocks and other components
+                for element in article_content.find_all(attrs={
+                    "data-component": [
+                        "topic-list",
+                        "tag-list",
+                        "share-tools",
+                        "recommendations",
+                        "related-content",
+                        "links-block"
+                    ]
+                }):
+                    element.decompose()
+                
+                # Remove specific BBC elements that contain related content
+                for element in article_content.find_all(class_=['topic-list', 'article__topics', 'article-share', 'article-footer']):
+                    element.decompose()
+                
+                # Process paragraphs and headers to preserve structure
+                paragraphs = []
+                
+                # Find all text-containing elements, focusing on actual article content
+                for element in article_content.find_all(['p', 'h2', 'h3', 'h4', 'h5', 'h6']):
+                    # Skip elements that are part of navigation, sharing, or related content
+                    if element.find_parent(attrs={"data-component": ["links-block", "topic-list", "tag-list", "share-tools", 
+                                                                   "recommendations", "related-content"]}):
+                        continue
+                        
+                    # Process all text nodes and links within the element
+                    text_parts = []
+                    for content in element.contents:
+                        if isinstance(content, str):  # Text node
+                            text_parts.append(content.strip())
+                        elif content.name == 'a':  # Link
+                            # Skip links that are likely to be related content
+                            if not content.find_parent(attrs={"data-component": ["links-block", "topic-list", "tag-list"]}):
+                                text_parts.append(content.get_text(strip=True))
+                        elif content.name in ['em', 'i', 'strong', 'b', 'span']:  # Inline formatting
+                            text_parts.append(content.get_text(strip=True))
+                    
+                    # Join all parts and normalize spaces
+                    text = ' '.join(text_parts)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    
+                    if text:  # Only add non-empty paragraphs
+                        paragraphs.append(text)
+                
+                # Join paragraphs with double newlines to preserve structure
+                text = '\n\n'.join(paragraphs)
+                
+                # Clean up the text
+                text = re.sub(r'[ \t]+', ' ', text)  # Clean up spaces and tabs, preserve newlines
+                text = re.sub(r'\s+([,\.])', r'\1', text)  # Remove spaces before punctuation
+                text = text.strip()
+                
+            else:
+                text = ""
+                logger.warning("Could not find main content container")
+            
+            # Log text statistics
+            logger.debug(f"Text length before truncation: {len(text.split())} words")
+            
+            # Limit to specified number of words
+            words = text.split()
+            if len(words) > tool_specific_values["PAGE_CONTENT_WORDS_LIMIT"]:
+                text = " ".join(words[:tool_specific_values["PAGE_CONTENT_WORDS_LIMIT"]])
+                logger.debug(f"Truncated content to {tool_specific_values['PAGE_CONTENT_WORDS_LIMIT']} words")
+                logger.debug(f"Text length after truncation: {len(text.split())} words")
+            
+            # Add the text content to the results
+            article_texts.append(text)
+            
+            logger.debug(f"Successfully scraped: {url}")
+                
+        except Exception as e:
+            logger.error(f"Error scraping {url}: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Add empty content for failed scrapes
+            article_texts.append("")
+    
+    return article_texts
+
+async def async_scrape_AlJazeera_news(urls: List[str]) -> List[str]:
+    """
+    Asynchronously scrape multiple Al Jazeera URLs using requests.
+    
+    Args:
+        urls: List of URLs to scrape
+        
+    Returns:
+        List of article text content
+    """
+    # Create temp directory if it doesn't exist
+    temp_dir = "temp_test_data"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Initialize results
+    article_texts = []
+    
+    # Process each URL
+    for url in urls:
+        try:
+            logger.debug(f"Scraping Al Jazeera URL: {url}")
+                
+            # Generate headers for this request
+            headers = get_request_headers()
+                
+            # Fetch the page content
+            response = requests.get(url, headers=headers, timeout=120)
+            response.raise_for_status()
+            
+            # Parse the HTML
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Save raw HTML for debugging
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            url_safe = re.sub(r'[^a-zA-Z0-9]', '_', url)
+            filename = os.path.join(temp_dir, f"AlJazeera_scrape_{url_safe}_{timestamp}")
+            
+            # with open(f"{filename}_raw.html", "w", encoding="utf-8") as f:
+            #     f.write(response.text)
+            
+            # Look for the main article content using the specific Al Jazeera div class
+            article_content = soup.find('div', class_='wysiwyg wysiwyg--all-content')
+            
+            # Save article content for debugging
+            if article_content:
+                with open(f"{filename}_article_content.html", "w", encoding="utf-8") as f:
+                    f.write(article_content.prettify())
+                
+                # Log the found content structure before cleaning
+                logger.debug("Found article content with initial structure:")
+                logger.debug(f"Number of paragraphs: {len(article_content.find_all('p'))}")
+                logger.debug(f"Number of h2 headings: {len(article_content.find_all('h2'))}")
+                logger.debug(f"Number of h3 headings: {len(article_content.find_all('h3'))}")
+                logger.debug(f"Number of links: {len(article_content.find_all('a'))}")
+                logger.debug(f"Number of list items: {len(article_content.find_all('li'))}")
+                
+                # First, remove all unwanted elements
+                elements_to_remove = [
+                    # Remove recommended stories
+                    {'class_': 'more-on'},
+                    # Remove all ad containers
+                    {'class_': 'container--ads'},
+                    # Remove newsletter signup
+                    {'class_': 'article-newsletter-slot'},
+                    # Remove screen reader text
+                    {'class_': 'screen-reader-text'}
+                ]
+                
+                for criteria in elements_to_remove:
+                    for element in article_content.find_all(class_=criteria['class_']):
+                        element.decompose()
+                
+                # Log the content structure after cleaning
+                logger.debug("\nArticle content structure after cleaning:")
+                logger.debug(f"Number of paragraphs: {len(article_content.find_all('p'))}")
+                logger.debug(f"Number of h2 headings: {len(article_content.find_all('h2'))}")
+                logger.debug(f"Number of h3 headings: {len(article_content.find_all('h3'))}")
+                logger.debug(f"Number of links: {len(article_content.find_all('a'))}")
+                logger.debug(f"Number of list items: {len(article_content.find_all('li'))}")
+                
+                # Process content in order to maintain structure
+                content_elements = []
+                
+                # Helper function to process text from an element
+                def process_element_text(element):
+                    text_parts = []
+                    for content in element.contents:
+                        if isinstance(content, str):
+                            text_parts.append(content.strip())
+                        elif content.name == 'a':
+                            text_parts.append(content.get_text(strip=True))
+                        elif content.name in ['em', 'i', 'strong', 'b', 'span', 'p']:
+                            text_parts.append(content.get_text(strip=True))
+                    
+                    # Join and clean the text
+                    text = ' '.join(text_parts)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    return text
+                
+                # First, handle headings and paragraphs at the top level
+                for element in article_content.children:
+                    # Skip if not a tag
+                    if not hasattr(element, 'name'):
+                        continue
+                    
+                    # Process based on element type
+                    if element.name in ['p', 'h2', 'h3']:
+                        text = process_element_text(element)
+                        
+                        # Add heading marker for h2/h3
+                        if element.name == 'h2':
+                            text = f"\n## {text}\n"
+                        elif element.name == 'h3':
+                            text = f"\n### {text}\n"
+                            
+                        if text:  # Only add non-empty elements
+                            content_elements.append(text)
+                    
+                    # Handle lists at the top level
+                    elif element.name == 'ul':
+                        # Process each list item
+                        for li in element.find_all('li', recursive=False):
+                            list_text = "- " + process_element_text(li)
+                            if list_text:  # Only add non-empty elements
+                                content_elements.append(list_text)
+                
+                # Now also find all lists in the article (for nested lists)
+                for ul in article_content.find_all('ul'):
+                    # Check if we already processed this list at the top level
+                    if ul.parent == article_content:
+                        continue  # Skip already processed lists
+                        
+                    # Process each list item in this nested list
+                    for li in ul.find_all('li', recursive=False):
+                        list_text = "- " + process_element_text(li)
+                        if list_text:  # Only add non-empty elements
+                            content_elements.append(list_text)
+                
+                # Join all elements with appropriate spacing
+                text = '\n'.join(content_elements)
+                
+                # Clean up the text
+                text = re.sub(r'\n{3,}', '\n\n', text)  # Replace multiple newlines with double newlines
+                text = re.sub(r'[ \t]+', ' ', text)  # Clean up spaces and tabs
+                text = re.sub(r'\s+([,\.])', r'\1', text)  # Remove spaces before punctuation
+                text = text.strip()
+                
+                # Save the processed text for debugging
+                # with open(f"{filename}_processed.txt", "w", encoding="utf-8") as f:
+                #     f.write(text)
+                
+                # Log text statistics
+                logger.debug(f"\nText statistics:")
+                logger.debug(f"Text length before truncation: {len(text.split())} words")
+                
+                # Limit to specified number of words if needed
+                words = text.split()
+                if len(words) > tool_specific_values["PAGE_CONTENT_WORDS_LIMIT"]:
+                    text = " ".join(words[:tool_specific_values["PAGE_CONTENT_WORDS_LIMIT"]])
+                    logger.debug(f"Truncated content to {tool_specific_values['PAGE_CONTENT_WORDS_LIMIT']} words")
+                
+            else:
+                text = ""
+                logger.warning("Could not find main content container")
+            
+            # Add the text content to the results
+            article_texts.append(text)
+            
+            logger.debug(f"Successfully scraped: {url}")
+                
+        except Exception as e:
+            logger.error(f"Error scraping {url}: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Add empty content for failed scrapes
+            article_texts.append("")
+    
+    return article_texts
+
+async def async_scrape_Reuters_news(urls: List[str]) -> List[str]:
+    """
+    Placeholder function that returns empty strings since Reuters scraping is skipped.
+    This function exists only to satisfy the function reference in get_latest_news_from_Reuters.
+    
+    Args:
+        urls: List of URLs that won't be scraped
+        
+    Returns:
+        List of empty strings matching the length of the input URLs list
+    """
+    return [""] * len(urls)
+
+async def async_scrape_AP_news(urls: List[str]) -> List[str]:
+    """
+    Asynchronously scrape multiple Associated Press (AP) URLs using requests.
+    
+    Args:
+        urls: List of URLs to scrape
+        
+    Returns:
+        List of article text content
+    """
+    # Create temp directory if it doesn't exist
+    temp_dir = "temp_test_data"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Initialize results
+    article_texts = []
+    
+    # Process each URL
+    for url in urls:
+        try:
+            logger.debug(f"Scraping AP News URL: {url}")
+                
+            # Generate headers for this request
+            headers = get_request_headers()
+                
+            # Fetch the page content
+            response = requests.get(url, headers=headers, timeout=120)
+            response.raise_for_status()
+            
+            # Parse the HTML
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Save raw HTML for debugging
+            # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # url_safe = re.sub(r'[^a-zA-Z0-9]', '_', url)
+            # filename = os.path.join(temp_dir, f"AP_scrape_{url_safe}_{timestamp}")
+            
+            # with open(f"{filename}_raw.html", "w", encoding="utf-8") as f:
+            #     f.write(response.text)
+            
+            # Look for the main article content - AP News typically uses RichTextStoryBody
+            article_content = soup.find('div', class_='RichTextStoryBody RichTextBody')
+            
+            # If RichTextStoryBody isn't found, try the Article class as fallback
+            if not article_content:
+                article_content = soup.find('div', class_='Article')
+            
+            
+            # Save article content for debugging
+            if article_content:
+                # with open(f"{filename}_article_content.html", "w", encoding="utf-8") as f:
+                #     f.write(article_content.prettify())
+                
+                # Log the found content structure before cleaning
+                logger.debug("Found article content with initial structure:")
+                logger.debug(f"Number of paragraphs: {len(article_content.find_all('p'))}")
+                logger.debug(f"Number of h2 headings: {len(article_content.find_all('h2'))}")
+                logger.debug(f"Number of h3 headings: {len(article_content.find_all('h3'))}")
+                
+                # Remove unwanted elements
+                elements_to_remove = [
+                    # Remove ad containers
+                    {'class_': 'ad-placeholder'},
+                    {'class_': 'SovrnAd'},
+                    {'class_': 'Advertisement'},
+                    # Remove related content
+                    {'class_': 'Related'},
+                    {'class_': 'PageListEnhancementGeneric'},
+                    {'class_': 'HTMLModuleEnhancement'},
+                    # Remove social media sharing
+                    {'class_': 'social-share'},
+                    # Remove newsletter signup
+                    {'class_': 'newsletter-subscribe'},
+                    # Remove media components that are not part of the main article
+                    {'class_': 'Media-caption'}
+                ]
+                
+                for criteria in elements_to_remove:
+                    for attribute, value in criteria.items():
+                        for element in article_content.find_all(class_=value):
+                            element.decompose()
+                
+                # Process article content to extract text
+                paragraphs = []
+                
+                # Process headings first
+                for heading in article_content.find_all(['h1', 'h2', 'h3', 'h4']):
+                    heading_text = heading.get_text(strip=True)
+                    if heading_text:
+                        paragraphs.append(f"\n## {heading_text}\n")
+                
+                # Then process paragraphs
+                for para in article_content.find_all('p'):
+                    # Skip paragraphs within unwanted elements that weren't caught earlier
+                    if para.find_parent(class_=['SovrnAd', 'Advertisement', 'Related', 'social-share', 'newsletter-subscribe']):
+                        continue
+                    
+                    # Process text within the paragraph
+                    text_parts = []
+                    for content in para.contents:
+                        if isinstance(content, str):  # Text node
+                            text_parts.append(content.strip())
+                        elif content.name == 'a':  # Link
+                            text_parts.append(content.get_text(strip=True))
+                        elif content.name in ['em', 'i', 'strong', 'b', 'span']:  # Inline formatting
+                            text_parts.append(content.get_text(strip=True))
+                    
+                    # Join and clean text
+                    text = ' '.join(text_parts)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    
+                    if text:  # Only add non-empty paragraphs
+                        paragraphs.append(text)
+                
+                # Join paragraphs with double newlines to preserve structure
+                text = '\n\n'.join(paragraphs)
+                
+                # Clean up the text
+                text = re.sub(r'[ \t]+', ' ', text)  # Clean up spaces and tabs
+                text = re.sub(r'\s+([,\.])', r'\1', text)  # Remove spaces before punctuation
+                text = re.sub(r'\n{3,}', '\n\n', text)  # Replace multiple newlines with double newlines
+                text = text.strip()
+                
+              
+
+                
+                # Log text statistics
+                logger.debug(f"Text length before truncation: {len(text.split())} words")
+                
+                # Limit to specified number of words
+                words = text.split()
+                if len(words) > tool_specific_values["PAGE_CONTENT_WORDS_LIMIT"]:
+                    text = " ".join(words[:tool_specific_values["PAGE_CONTENT_WORDS_LIMIT"]])
+                    logger.debug(f"Truncated content to {tool_specific_values['PAGE_CONTENT_WORDS_LIMIT']} words")
+                
+            else:
+                # Last resort - try to find any main content container
+                article_body = soup.find('main') or soup.find('article')
+                
+                if article_body:
+                    logger.debug("Found main/article element as fallback")
+                    paragraphs = []
+                    
+                    for element in article_body.find_all(['p', 'h2', 'h3', 'h4']):
+                        if element.name.startswith('h'):
+                            paragraphs.append(f"\n## {element.get_text(strip=True)}\n")
+                        else:
+                            paragraphs.append(element.get_text(strip=True))
+                    
+                    text = '\n\n'.join(paragraphs)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                else:
+                    text = ""
+                    logger.warning("Could not find any main content container")
+            
+            # Add the text content to the results
+            article_texts.append(text)
+            
+            logger.debug(f"Successfully scraped: {url}")
+                
+        except Exception as e:
+            logger.error(f"Error scraping {url}: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Add empty content for failed scrapes
+            article_texts.append("")
+    
+    return article_texts
+
+async def get_search_results(query: str, number_of_results: int = 1, search_type: Literal["web", "news"] = "web") -> List[Dict[str, Any]]:
+    """
+    Get search results from the Brave Search API.
+    
+    Args:
+        query: The search query string
+        number_of_results: Maximum number of results to return
+        search_type: Type of search to perform ("web" or "news")
+        
+    Returns:
+        List of search result dictionaries
+    """
+    try:
+        log(f"Connecting to Brave Search API for {search_type} search")
+        
+        # Set up query parameters
+        params = {
+            "q": query,
+            "count": number_of_results,
+            "search_lang": "en",
+            "ui_lang": "en-US",
+            "safesearch": "off",
+            "text_decorations": "1",
+            "spellcheck": "1",
+        }
+        
+        # Set result filter based on search type
+        if search_type == "web":
+            params["result_filter"] = "web"
+        elif search_type == "news":
+            params["result_filter"] = "news"
+        
+        # Select appropriate API endpoint based on search type
+        api_url = (tool_specific_values["BRAVE_SEARCH_NEWS_API_BASE_URL"] 
+                  if search_type == "news" 
+                  else tool_specific_values["BRAVE_SEARCH_API_BASE_URL"])
+        
+        logger.debug(f"Using API endpoint: {api_url}")
+        logger.debug(f"Search parameters: {json.dumps(params, indent=2)}")
+        
+        # Generate headers for this request
+        headers = get_request_headers()
+        logger.debug(f"Request headers: {json.dumps(headers, indent=2)}")
+        
+        # Send the request to the Brave Search API
+        resp = requests.get(
+            api_url,
+            params=params,
+            headers=headers,
+            timeout=120
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        
+        # Log the full response for debugging
+        # log(f"Full API Response for {search_type} search:", "info")
+        # log(json.dumps(data, indent=2), "info", False)
+
+        # Extract results from Brave Search response
+        results = []
+        
+        # Process results based on search type
+        if search_type == "news":
+            if "results" in data:
+                logger.debug(f"Found {len(data['results'])} news results")
+                for result in data["results"]:
+                    results.append({
+                        "title": result.get("title", ""),
+                        "link": result.get("url", ""),
+                        "snippet": result.get("description", ""),
+                        "category": "news",
+                        "publication_date": result.get("page_age", ""),  # News API uses page_age
+                        "source": result.get("meta_url", {}).get("hostname", ""),
+                        "thumbnail": result.get("thumbnail", {}).get("src", "")
+                    })
+        else:  # web search
+            if "web" in data and "results" in data["web"]:
+                logger.debug(f"Found {len(data['web']['results'])} web results")
+                for result in data["web"]["results"]:
+                    results.append({
+                        "title": result.get("title", ""),
+                        "link": result.get("url", ""),
+                        "snippet": result.get("description", ""),
+                        "category": "web",
+                        "publication_date": result.get("page_age", "")
+                    })
+        
+        logger.debug(f"Total results after processing: {len(results)}")
+        log(f"Found {len(results)} search results", "success")
+        return results
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Search engine error for {search_type} search: {str(e)}"
+        log(error_msg, "error")
+        logger.error(f"Full error details: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return []
+
+async def get_latest_news_from_source(
+    search_query: str, 
+    source_name: str, 
+    source_url: str,
+    web_results_count: int,
+    news_results_count: int,
+    scrape_function: callable,
+    skip_scraping_and_use_AI_summary: bool = False
+) -> RULAC_TOOL_RESULT:
+    """
+    Helper function that retrieves the latest news articles from a specified news source.
+    
+    Args:
+        search_query: The search query to find relevant news articles
+        source_name: The name of the news source (e.g., "BBC", "Al Jazeera")
+        source_url: The base URL for the news source (e.g., "www.bbc.com/news")
+        web_results_count: Number of web search results to fetch (0 to skip web search)
+        news_results_count: Number of news search results to fetch (0 to skip news search)
+        scrape_function: The specific scraping function to use for this source
+        skip_scraping_and_use_AI_summary: If True, uses the snippet/description from API instead of scraping
+        
+    Returns:
+        A standardized RULAC_TOOL_RESULT
+    """
+    tool_name = f"get_latest_news_from_{source_name.replace(' ', '')}"
+    
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+    
+    # Set up tool metadata for result
+    research_task = f"Retrieve {source_name} News articles for: {search_query}"
+    UI_facing_research_task = f"Researching {source_name} News articles about: {search_query}"
+    tool_params = {
+        "search_query": search_query,
+        "research_task": research_task,
+        "UI_facing_research_task": UI_facing_research_task
+    }
+    
+    try:
+        # Construct the search query with site filter
+        initial_search_query = search_query
+        search_query = f'site:{source_url} {search_query}'
+        log(f"Searching {source_name} News for articles about: {initial_search_query}")
+        log(f"Search query: {search_query}")
+        
+        # Initialize results containers
+        web_search_results = []
+        news_search_results = []
+        
+        # Get web search results if count > 0
+        if web_results_count > 0:
+            web_search_results = await get_search_results(
+                query=search_query,
+                number_of_results=web_results_count,
+                search_type="web"
+            )
+            log(f"Found {len(web_search_results)} web search results", "info")
+        else:
+            log("Skipping web search as web_results_count is 0", "info")
+        
+        # Get news search results if count > 0
+        if news_results_count > 0:
+            news_search_results = await get_search_results(
+                query=search_query,
+                number_of_results=news_results_count,
+                search_type="news"
+            )
+            log(f"Found {len(news_search_results)} news search results", "info")
+        else:
+            log("Skipping news search as news_results_count is 0", "info")
+        
+        # Remove duplicates based on URL before combining results
+        seen_urls = set()
+        deduplicated_results = []
+        
+        # Helper function to add unique results
+        def add_unique_results(results):
+            for result in results:
+                url = result.get('link')
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    deduplicated_results.append(result)
+        
+        # Add web results first (they tend to be more comprehensive)
+        add_unique_results(web_search_results)
+        # Then add news results
+        add_unique_results(news_search_results)
+        
+        # Sort results by publication date in ascending order (oldest first)
+        deduplicated_results.sort(key=lambda x: x.get("publication_date", ""))
+        
+        # Use deduplicated results instead of raw combination
+        search_results = deduplicated_results
+        
+        # Pretty print the results for debugging
+        log("Search Results:", "info")
+        log(f"Found {len(web_search_results)} web results and {len(news_search_results)} news results", "info")
+        for i, result in enumerate(search_results, 1):
+            log(f"\nResult {i}:", "info", False)
+            log(f"Title: {result.get('title', 'No title')}", "info", False)
+            log(f"Link: {result.get('link', 'No link')}", "info", False)
+            log(f"Snippet: {result.get('snippet', 'No snippet')}", "info", False)
+            log(f"Category: {result.get('category', 'No category')}", "info", False)
+            log(f"Source: {result.get('source', 'No source')}", "info", False)
+            log(f"Publication Date: {result.get('publication_date', 'No date')}", "info", False)
+            log("-" * 50, "info", False)
+        
+        # Initialize containers for results
+        formatted_results = []
+        citations = []
+        
+        if search_results:
+            log(f"Processing {len(search_results)} search results")
+            
+            # Get URLs from results
+            urls = [r["link"] for r in search_results]
+            
+            if skip_scraping_and_use_AI_summary:
+                log(f"Skipping scraping and using snippets from search results")
+                
+                # Use snippets from search results instead of scraping
+                for i, result in enumerate(search_results):
+                    url = result.get("link", "")
+                    title = result.get("title", f"{source_name} News article about {initial_search_query}")
+                    publication_date = result.get("publication_date", "")
+                    
+                    # Use snippet as content
+                    content = result.get("snippet", "")
+                    
+                    if not content:
+                        continue
+                    
+                    # Format article with XML structure
+                    logger.debug(f"Formatting article with title: {title}")
+                    formatted_article = f"""<article>\n<title>{title}</title>\n<publication_date>{publication_date}</publication_date>\n<content>{content}</content>\n</article>"""
+                    logger.debug("XML Structure created:")
+                    logger.debug(formatted_article[:500] + "..." if len(formatted_article) > 500 else formatted_article)
+                    
+                    formatted_results.append(formatted_article)
+                    logger.debug(f"Total articles formatted so far: {len(formatted_results)}")
+                    
+                    # Create citation using standard format
+                    citation = create_standard_citation(
+                        title=title,
+                        url=url,
+                        formatted_content=content
+                    )
+                    citations.append(citation)
+            else:
+                try:
+                    log(f"Scraping content from {len(urls)} pages")
+                    article_texts = await scrape_function(urls)
+                    
+                    # Process and format results
+                    for url, title, publication_date, article_text in zip(urls, [r["title"] for r in search_results], 
+                                                                         [r["publication_date"] for r in search_results], 
+                                                                         article_texts):
+                        if not article_text:
+                            continue
+                        
+                        # Format article with XML structure
+                        logger.debug(f"Formatting article with title: {title}")
+                        formatted_article = f"""<article>\n<title>{title}</title>\n<publication_date>{publication_date}</publication_date>\n<content>{article_text}</content>\n</article>"""
+                        logger.debug("XML Structure created:")
+                        logger.debug(formatted_article[:500] + "..." if len(formatted_article) > 500 else formatted_article)
+                        
+                        formatted_results.append(formatted_article)
+                        logger.debug(f"Total articles formatted so far: {len(formatted_results)}")
+                        
+                        # Create citation using standard format
+                        citation = create_standard_citation(
+                            title=title if title else f"{source_name} News article about {initial_search_query}",
+                            url=url,
+                            formatted_content=article_text
+                        )
+                        citations.append(citation)
+                    
+                except Exception as e:
+                    log(f"Error during page scraping: {str(e)}", "error")
+                    logger.error(f"Full error details: {str(e)}")
+                    logger.error(f"Error type: {type(e).__name__}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+        else:
+            log("No search results found", "error")
+        
+        log(f"Search complete. Found {len(formatted_results)} relevant articles", "success")
+        
+        # Prepare the final content for prompt, including source-specific tags
+        tag_name = f"{source_name.replace(' ', '_')}_News"
+        logger.debug(f"Creating final content with {tag_name} tags")
+        final_content = f"<{tag_name}>\nLatest {source_name} News Articles about: {initial_search_query}" + "\n\n".join(formatted_results) + f"\n</{tag_name}>"
+        logger.debug("Final content structure (first 500 chars):")
+        logger.debug(final_content[:500] + "..." if len(final_content) > 500 else final_content)
+        
+        # Display formatted results
+        display_formatted_results(
+            cleaned_tool_message=final_content if formatted_results else f"No relevant {source_name} News articles found for this query.",
+            title=f"{source_name.upper()} NEWS ARTICLES",
+            tool_name=tool_name,
+            tool_params=tool_params,
+            citations=citations,
+            beacon_tool_source=source_name.replace(' ', ''),
+            showFull=True
+        )
+        
+        # Return no results if none found
+        if not formatted_results:
+            # Print end marker for tool execution
+            console.print("\n[bold white]" + "="*50 + "\n" + 
+                         f"ENDING TOOL: {tool_name} (no results)\n" + 
+                         "="*50 + "[/bold white]\n")
+                         
+            # Return formatted empty result
+            return format_standard_tool_result(
+                content=f"No relevant {source_name} News articles found for this query.",
+                citations=[],
+                tool_name=tool_name,
+                tool_params=tool_params,
+                beacon_tool_source=source_name.replace(' ', '')
+            )
+        
+        # Print end marker for tool execution
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        # Return standardized result
+        return format_standard_tool_result(
+            content=final_content,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=tool_params,
+            beacon_tool_source=source_name.replace(' ', '')
+        )
+    
+    except Exception as e:
+        error_message = f"Error retrieving {source_name} News articles: {str(e)}"
+        log(error_message, "error")
+        
+        # Print end marker for tool execution
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        # Return formatted error result
+        return format_standard_tool_result(
+            content=f"Error retrieving {source_name} News articles: {str(e)}",
+            citations=[],
+            tool_name=tool_name,
+            tool_params=tool_params,
+            beacon_tool_source=source_name.replace(' ', '')
+        )
+
+@tool
+async def get_latest_news_from_BBC(search_query: str) -> RULAC_TOOL_RESULT:
+    """
+    Retrieves the latest news articles from BBC News based on the provided search query.
+    
+    :param search_query: The search query to find relevant BBC news articles
+    :return: A dictionary with "content" containing the article content and "citations" list
+    """
+    return await get_latest_news_from_source(
+        search_query=search_query,
+        source_name="BBC",
+        source_url="www.bbc.com/news/articles",
+        web_results_count=1,
+        news_results_count=1,
+        scrape_function=async_scrape_BBC_news
+    )
+
+@tool
+async def get_latest_news_from_AlJazeera(search_query: str) -> RULAC_TOOL_RESULT:
+    """
+    Retrieves the latest news articles from Al Jazeera News based on the provided search query.
+    
+    :param search_query: The search query to find relevant Al Jazeera news articles
+    :return: A dictionary with "content" containing the article content and "citations" list
+    """
+    return await get_latest_news_from_source(
+        search_query=search_query,
+        source_name="AlJazeera",
+        source_url="www.aljazeera.com/news",
+        web_results_count=1,
+        news_results_count=1, # ideally 3 but for debugging start with 0 or 1
+        scrape_function=async_scrape_AlJazeera_news
+    )
+
+@tool
+async def get_latest_news_from_Reuters(search_query: str) -> RULAC_TOOL_RESULT:
+    """
+    Retrieves the latest news articles from Reuters News based on the provided search query.
+    Uses article snippets instead of scraping full content due to Reuters site protections.
+    
+    :param search_query: The search query to find relevant Reuters news articles
+    :return: A dictionary with "content" containing the article content and "citations" list
+    """
+    return await get_latest_news_from_source(
+        search_query=search_query,
+        source_name="Reuters",
+        source_url="www.reuters.com/world",
+        web_results_count=10,
+        news_results_count=10,
+        scrape_function=async_scrape_Reuters_news,
+        skip_scraping_and_use_AI_summary=True
+    )
+
+@tool
+async def get_latest_news_from_AP(search_query: str) -> RULAC_TOOL_RESULT:
+    """
+    Retrieves the latest news articles from Associated Press (AP) News based on the provided search query.
+    
+    :param search_query: The search query to find relevant AP news articles
+    :return: A dictionary with "content" containing the article content and "citations" list
+    """
+    return await get_latest_news_from_source(
+        search_query=search_query,
+        source_name="AP",
+        source_url="apnews.com/article",
+        web_results_count=0,
+        news_results_count=2,
+        scrape_function=async_scrape_AP_news
+    )
+
+async def save_search_results_to_cache(search_query: str, combined_content: str, all_citations: List[Dict[str, Any]]) -> None:
+    """
+    Save search results to a cache file.
+    
+    Args:
+        search_query: The search query used
+        combined_content: The combined content from all news sources
+        all_citations: List of citations from all news sources
+    """
+    # Create cache directory if it doesn't exist
+    cache_dir = "news_search_cache"
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Create a safe filename from the search query
+    safe_query = re.sub(r'[^a-zA-Z0-9]', '_', search_query)
+    cache_file = os.path.join(cache_dir, f"news_search_{safe_query}.md")
+    citations_file = os.path.join(cache_dir, f"citations_{safe_query}.json")
+    
+    # Save the content and citations
+    with open(cache_file, "w", encoding="utf-8") as f:
+        f.write(combined_content)
+    
+    # Save citations to a separate JSON file
+    with open(citations_file, "w", encoding="utf-8") as f:
+        json.dump(all_citations, f, indent=2)
+    
+    log(f"Saved search results to cache: {cache_file}", "success")
+
+async def load_latest_cached_results(search_query: str) -> Tuple[Optional[str], Optional[List[Dict[str, Any]]]]:
+    """
+    Load the cached search results for a given query.
+    
+    Args:
+        search_query: The search query to find cached results for
+        
+    Returns:
+        Tuple of (combined_content, citations) if found, (None, None) otherwise
+    """
+    cache_dir = "news_search_cache"
+    if not os.path.exists(cache_dir):
+        return None, None
+    
+    # Create a safe filename from the search query
+    safe_query = re.sub(r'[^a-zA-Z0-9]', '_', search_query)
+    cache_file = os.path.join(cache_dir, f"news_search_{safe_query}.md")
+    citations_file = os.path.join(cache_dir, f"citations_{safe_query}.json")
+    
+    # Check if both files exist
+    if not (os.path.exists(cache_file) and os.path.exists(citations_file)):
+        return None, None
+    
+    # Load the content
+    with open(cache_file, "r", encoding="utf-8") as f:
+        combined_content = f.read()
+    
+    # Load the citations
+    with open(citations_file, "r", encoding="utf-8") as f:
+        citations = json.load(f)
+    
+    log(f"Loaded cached results from: {cache_file}", "success")
+    return combined_content, citations
+
+async def test_combined_news_search_tool(search_query: str, useCachedSearchResults: bool = False) -> None:
+    """
+    Test function that combines search results from BBC, Al Jazeera, and AP news sources
+    and sends the combined content to Groq LLM for answering a query using ChatGroq.
+    
+    Args:
+        search_query: The search query to find relevant news articles
+        useCachedSearchResults: If True, use cached results instead of fetching new ones
+    """
+    start_time = time.time()
+    
+    log(f"STARTING COMBINED NEWS SEARCH TEST: '{search_query}'", "title")
+    
+    # Try to load cached results if requested
+    if useCachedSearchResults:
+        combined_content, all_citations = await load_latest_cached_results(search_query)
+        if combined_content and all_citations:
+            log("Using cached search results", "success")
+            data_collection_time = 0  # No data collection time when using cache
+        else:
+            log("No cached results found, falling back to fresh search", "info")
+            useCachedSearchResults = False
+    
+    # If not using cached results, perform fresh search
+    if not useCachedSearchResults:
+        # Set up a combined content string to hold all results
+        combined_content = f"# News articles about: {search_query}\n\n"
+        all_citations = []
+        
+        # Get results from all three news sources
+        try:
+            # BBC News
+            bbc_start_time = time.time()
+            log("Fetching BBC News articles...", "info")
+            bbc_result = await get_latest_news_from_BBC.ainvoke({"search_query": search_query})
+            bbc_elapsed = time.time() - bbc_start_time
+            
+            if isinstance(bbc_result["content"], str) and "No relevant BBC News articles found" not in bbc_result["content"]:
+                combined_content += f"\n## BBC News Articles\n{bbc_result['content']}\n\n"
+                all_citations.extend(bbc_result["citations"])
+                log(f"Added {len(bbc_result['citations'])} BBC News articles (took {bbc_elapsed:.2f} seconds)", "success")
+            else:
+                log(f"No BBC News articles found (search took {bbc_elapsed:.2f} seconds)", "info")
+            
+            # Al Jazeera News
+            aljazeera_start_time = time.time()
+            log("Fetching Al Jazeera News articles...", "info")
+            aljazeera_result = await get_latest_news_from_AlJazeera.ainvoke({"search_query": search_query})
+            aljazeera_elapsed = time.time() - aljazeera_start_time
+            
+            if isinstance(aljazeera_result["content"], str) and "No relevant AlJazeera News articles found" not in aljazeera_result["content"]:
+                combined_content += f"\n## Al Jazeera News Articles\n{aljazeera_result['content']}\n\n"
+                all_citations.extend(aljazeera_result["citations"])
+                log(f"Added {len(aljazeera_result['citations'])} Al Jazeera News articles (took {aljazeera_elapsed:.2f} seconds)", "success")
+            else:
+                log(f"No Al Jazeera News articles found (search took {aljazeera_elapsed:.2f} seconds)", "info")
+            
+            # AP News
+            ap_start_time = time.time()
+            log("Fetching AP News articles...", "info")
+            ap_result = await get_latest_news_from_AP.ainvoke({"search_query": search_query})
+            ap_elapsed = time.time() - ap_start_time
+            
+            if isinstance(ap_result["content"], str) and "No relevant AP News articles found" not in ap_result["content"]:
+                combined_content += f"\n## AP News Articles\n{ap_result['content']}\n\n"
+                all_citations.extend(ap_result["citations"])
+                log(f"Added {len(ap_result['citations'])} AP News articles (took {ap_elapsed:.2f} seconds)", "success")
+            else:
+                log(f"No AP News articles found (search took {ap_elapsed:.2f} seconds)", "info")
+            
+            # Save results to cache for future use
+            await save_search_results_to_cache(search_query, combined_content, all_citations)
+            
+            # Create final combined result
+            data_collection_time = time.time() - start_time
+            log(f"Combined {len(all_citations)} total news articles (data collection took {data_collection_time:.2f} seconds)", "success")
+            
+        except Exception as e:
+            log(f"Error in combined news search: {str(e)}", "error")
+            log(f"Error type: {type(e).__name__}", "error")
+            import traceback
+            log(f"Traceback: {traceback.format_exc()}", "error")
+            return
+    
+    # If we have content, send it to Groq LLM for analysis using ChatGroq
+    if all_citations:
+        log("Sending combined news content to Groq LLM for analysis using ChatGroq...", "info")
+        groq_start_time = time.time()
+        
+        # Groq API key from DRAGON_Beacon_v1.py
+        groq_api_key = ""
+        
+        # Initialize ChatGroq with appropriate model
+        chat = ChatGroq(
+            groq_api_key=groq_api_key,
+            # model="deepseek-r1-distill-qwen-32b",
+            # model="llama3-70b-8192", #only 8k token window
+            # model="llama-3.1-8b-instant", #only 8k token window
+            model="llama-3.3-70b-versatile",
+            temperature=0.2,
+            # max_tokens=1024
+        )
+        
+        # Prepare the prompt for Groq
+        user_query = f"Based on the latest news articles about '{search_query}', can you summarize the current situation and the most important developments?"
+        
+        # Prepare system prompt and messages
+        system_prompt = "You are an expert news analyst. Analyze the provided news articles and answer the user's query based on the information in the articles. Cite your sources clearly."
+        
+        # Create messages for ChatGroq
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"Here are news articles about {search_query}:\n\n{combined_content}\n\nBased on these articles, {user_query}")
+        ]
+        
+        # Pretty print the prompt being sent to Groq
+        log("\nFULL PROMPT SENT TO CHATGROQ:", "title")
+        prompt_text = f"SYSTEM: {system_prompt}\n\nUSER: Here are news articles about {search_query}:\n\n{combined_content}\n\nBased on these articles, {user_query}"
+        # Print the first 2000 chars and last 1000 chars if too long
+        if len(prompt_text) > 5000:
+            preview_text = prompt_text[:2000] + "\n\n[... content truncated ...]\n\n" + prompt_text[-1000:]
+            console.print(Panel(preview_text, title="Prompt Preview (truncated)", border_style="yellow"))
+            log(f"Full prompt length: {len(prompt_text.split())} words", "info")
+        else:
+            console.print(Panel(prompt_text, title="Complete Prompt", border_style="yellow"))
+        
+        # Make the LLM call using ChatGroq
+        try:
+            response_start_time = time.time()
+            response = chat.invoke(messages)
+            ai_response = response.content
+            groq_elapsed = time.time() - groq_start_time
+            api_elapsed = time.time() - response_start_time
+            
+            # Display the AI response
+            log(f"\nCHATGROQ ANALYSIS (API call took {api_elapsed:.2f} seconds)", "title")
+            console.print(Panel(Markdown(ai_response), title=f"Analysis of News Articles", border_style="green"))
+            
+        except Exception as e:
+            groq_elapsed = time.time() - groq_start_time
+            log(f"Error calling ChatGroq after {groq_elapsed:.2f} seconds: {str(e)}", "error")
+            log(f"Error type: {type(e).__name__}", "error")
+            import traceback
+            log(f"Traceback: {traceback.format_exc()}", "error")
+    else:
+        log("No news articles found to analyze", "error")
+    
+    total_elapsed = time.time() - start_time
+    log(f"COMBINED NEWS SEARCH TEST COMPLETED in {total_elapsed:.2f} seconds", "success")
+    
+    # Return timing statistics for reference
+    timing_stats = {
+        "total_time": total_elapsed,
+        "data_collection_time": locals().get("data_collection_time", 0),
+        "groq_time": locals().get("groq_elapsed", 0),
+        "sources": {
+            "bbc": locals().get("bbc_elapsed", 0),
+            "aljazeera": locals().get("aljazeera_elapsed", 0),
+            "ap": locals().get("ap_elapsed", 0)
+        }
+    }
+    
+    # Display timing statistics in a formatted table
+    from rich.table import Table
+    timing_table = Table(title="Timing Statistics")
+    timing_table.add_column("Component", style="cyan")
+    timing_table.add_column("Time (seconds)", justify="right", style="green")
+    timing_table.add_column("Percentage", justify="right", style="yellow")
+    
+    # Add rows for each source
+    timing_table.add_row("BBC News", f"{timing_stats['sources']['bbc']:.2f}", 
+                         f"{(timing_stats['sources']['bbc']/total_elapsed*100):.1f}%")
+    timing_table.add_row("Al Jazeera News", f"{timing_stats['sources']['aljazeera']:.2f}", 
+                         f"{(timing_stats['sources']['aljazeera']/total_elapsed*100):.1f}%")
+    timing_table.add_row("AP News", f"{timing_stats['sources']['ap']:.2f}", 
+                         f"{(timing_stats['sources']['ap']/total_elapsed*100):.1f}%")
+    
+    # Add Groq time if available
+    if "groq_elapsed" in locals():
+        timing_table.add_row("Groq LLM", f"{timing_stats['groq_time']:.2f}", 
+                             f"{(timing_stats['groq_time']/total_elapsed*100):.1f}%")
+    
+    # Add total time
+    timing_table.add_row("Total Execution", f"{total_elapsed:.2f}", "100.0%", style="bold")
+    
+    # Display the table
+    console.print(timing_table)
+
+if __name__ == "__main__":
+    import asyncio
+    
+    async def run_tests():
+        """Run all test functions"""
+        log("STARTING NEWS TOOLS TESTS", "title")
+        
+        # Test scenarios for news sources
+        news_test_scenarios = [
+            # {
+            #     "name": "Get News about deepseek",
+            #     "params": {
+            #         "search_query": "deepseek"
+            #     },
+            # },
+            # {
+            #     "name": "Get News about Technology",
+            #     "params": {
+            #         "search_query": "artificial intelligence drone"
+            #     },
+            # },
+            # {
+            #     "name": "Get News about Ukraine War",
+            #     "params": {
+            #         "search_query": "ukraine ceasefire"
+            #     },
+            # },
+            {
+                "name": "Get News about Ukraine conflict classification",
+                "params": {
+                    "search_query": "ukraine conflict classification"
+                },
+            },
+        ]
+
+        # Use the standardized test framework
+        await standardized_tool_test(
+            tool_function=get_latest_news_from_BBC,
+            test_scenarios=news_test_scenarios,
+            test_title="BBC News Retrieval Tool Test"
+        )
+
+        # await standardized_tool_test(
+        #     tool_function=get_latest_news_from_AlJazeera,
+        #     test_scenarios=news_test_scenarios,
+        #     test_title="Al Jazeera News Retrieval Tool Test"
+        # )
+
+        # # await standardized_tool_test(
+        # #     tool_function=get_latest_news_from_Reuters,
+        # #     test_scenarios=news_test_scenarios,
+        # #     test_title="Reuters News Retrieval Tool Test"
+        # # )
+
+        # await standardized_tool_test(
+        #     tool_function=get_latest_news_from_AP,
+        #     test_scenarios=news_test_scenarios,
+        #     test_title="AP News Retrieval Tool Test"
+        # )
+        
+        # Test the combined news search tool
+        # await test_combined_news_search_tool("trump and putin negotiations", useCachedSearchResults=True)
+        # await test_combined_news_search_tool("baldoni and blake lively", useCachedSearchResults=True)
+        # await test_combined_news_search_tool("ukraine ceasefire and negotiations", useCachedSearchResults=False)
+        await test_combined_news_search_tool("ukraine conflict classification under IHL law", useCachedSearchResults=True)
+
+        log("ALL TESTS COMPLETED", "success")
+    
+    # Run the async test function
+    asyncio.run(run_tests()) 
+
+
+
+#     For each searxng search:
+#  0. bang !news for news search
+#  1. site:
+#  2. query:
+#  3. time period (Anytime, Last Month, Last Week)
+
+
+# ## Latest news in general - universal search
+# - BBC: !news site:https://www.bbc.com/news/articles ukraine ceasefire (articles need to be mentioned or we get live feeds) (top 3 articles)
+# - Reuters: !news site:reuters.com/world gaza war (top 3 articles) (gets a bit better sorting with the "world")
+# - AlJazeera: !news site:https://www.aljazeera.com/news ukraine ceasefire (top 3)
+# - AP

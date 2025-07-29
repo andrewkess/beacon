@@ -1,0 +1,2652 @@
+from typing import List
+from langchain_core.tools import tool
+from rich.console import Console
+from rich.panel import Panel
+from rich.pretty import Pretty
+from rich.text import Text
+from rich.markdown import Markdown
+from langchain_neo4j import Neo4jGraph
+import json
+import logging
+import os
+import coloredlogs
+import asyncio
+import sys
+import requests
+from langchain_community.document_loaders import AsyncChromiumLoader
+from langchain_community.document_transformers import BeautifulSoupTransformer
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.messages import AIMessage
+from fake_useragent import UserAgent
+from bs4 import BeautifulSoup
+import re
+from urllib.parse import urlparse, urljoin
+import unicodedata
+
+# Global configuration values
+tool_specific_valves = {
+    "SEARXNG_ENGINE_API_BASE_URL": "http://searxng:8080/search",
+    "SEARXNG_ENGINE_API_TESTING_BASE_URL": "http://localhost:8081/search",
+    "IGNORED_WEBSITES": "",
+    "RETURNED_SCRAPPED_PAGES_NO": 3,
+    "SCRAPPED_PAGES_NO": 3,
+    "PAGE_CONTENT_WORDS_LIMIT": 2000,
+    "CITATION_LINKS": True,
+    "NEO4J_URL": "bolt://neo4j-arm:7687",
+    "NEO4J_TESTING_URL": "bolt://localhost:7687",
+    "NEO4J_USERNAME": "neo4j",
+    "NEO4J_PASSWORD": "password",
+}
+
+# Headers for requests
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+
+# Initialize Rich Console
+console = Console()
+
+# Configure logging
+logger = logging.getLogger("Beacon")
+coloredlogs.install(
+    logger=logger,
+    level="INFO",
+    isatty=True,
+    fmt="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+# Global Neo4j graph connection
+graph = None
+
+def initialize_neo4j(local_testing=False):
+    """Initialize the Neo4j graph connection using configuration values"""
+    global graph
+    
+    # If graph is already initialized, just return it
+    if graph is not None:
+        return graph
+    
+    # Dynamically switch Neo4j URL based on the testing flag
+    neo4j_url = tool_specific_valves["NEO4J_TESTING_URL"] if local_testing else tool_specific_valves["NEO4J_URL"]
+    neo4j_username = tool_specific_valves["NEO4J_USERNAME"]
+    neo4j_password = tool_specific_valves["NEO4J_PASSWORD"]
+    
+    # Debugging: Neo4j connection
+    print(f"DEBUG: Connecting to Neo4j at {neo4j_url} with username {neo4j_username}")
+    
+    try:
+        # Connect to Neo4j using the provided credentials
+        graph = Neo4jGraph(
+            url=neo4j_url,
+            username=neo4j_username,
+            password=neo4j_password,
+            enhanced_schema=False,
+        )
+        return graph
+    except Exception as conn_error:
+        error_msg = f"Error connecting to Neo4j: {conn_error}"
+        logger.error(error_msg)
+        raise Exception(error_msg) from conn_error
+
+# Initialize the Neo4j connection once at module load time
+try:
+    # Default to local testing mode which uses localhost Neo4j
+    # This can be overridden when the function is called
+    if os.path.exists("/app/backend/beacon_code"):
+        graph = initialize_neo4j(local_testing=False)
+    else:
+        graph = initialize_neo4j(local_testing=True)
+    print("DEBUG: Neo4j connection initialized successfully")
+except Exception as e:
+    print(f"WARNING: Failed to initialize Neo4j on module load: {e}")
+    print("Tools requiring Neo4j will attempt to reconnect when used")
+
+
+class HelpFunctions:
+    def get_base_url(self, url):
+        """Extract base URL from full URL."""
+        parsed = urlparse(url)
+        return parsed.netloc
+
+    def remove_emojis(self, text):
+        """Remove emojis from text."""
+        emoji_pattern = re.compile("["
+            u"\U0001F600-\U0001F64F"  # emojis
+            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+            u"\U0001F680-\U0001F6FF"  # transport & map symbols
+            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            u"\U00002702-\U000027B0"
+            u"\U000024C2-\U0001F251"
+            "]+", flags=re.UNICODE)
+        return emoji_pattern.sub(r'', text)
+
+
+# Set up fake user agent
+ua = UserAgent()
+os.environ["USER_AGENT"] = ua.random
+
+
+# # Load Beacon public files from local files if os path doesnt exist
+# else:
+try:
+
+        # system prompts
+
+        # Final System Prompts for General and Tool Agents
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_StateActor
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_NonStateActor
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_taking_place_country
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_org
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_Region
+        from prompts.indv_tool_prompts import baselineRULACinfo
+        from prompts.indv_tool_prompts import baselineClassificationMethodology
+        from prompts.indv_tool_prompts import baselineIHLLegalFramework
+
+except Exception as e:
+        print("DEBUG: Error importing code and functions:", e)
+        raise
+
+
+def substitute_params(query: str, params: dict) -> str:
+    """Return a debug version of the query with parameters substituted as strings."""
+    debug_query = query
+    for key, value in params.items():
+        # Convert the value to its JSON representation so that lists/strings are properly quoted.
+        debug_value = json.dumps(value)
+        debug_query = debug_query.replace(f"${key}", debug_value)
+    return debug_query
+
+
+def collect_RULAC_citations(research_data: dict) -> list:
+    """
+    Processes the RULAC research data (a dict) to extract citations and returns them as a list.
+
+    Expected input structure:
+        {
+          "summary": <summary text>,
+          "conflict_details": [ 
+              {
+                  "conflict_name": <n>,
+                  "conflict_overview": <overview>,
+                  "applicable_ihl_law": <ihl law>,
+                  "conflict_citation": <citation URL>,
+                  "state_parties": <string of state parties>,
+                  "conflict_classification": <classification>,
+                  "non_state_parties": <string of non state parties>
+              },
+              ... additional conflicts ...
+          ]
+        }
+    
+    Args:
+        research_data (dict): The research data returned from the Neo4j query.
+        
+    Returns:
+        list: A list of citation objects ready to be emitted
+    """
+    citations = []
+    
+    # Check if research_data is provided and is a dict.
+    if not research_data or not isinstance(research_data, dict):
+        print("DEBUG: No research data found.")
+        return citations
+
+    conflict_details = research_data.get("conflict_details", [])
+    print(f"DEBUG: Found {len(conflict_details)} conflict detail(s) in research data.")
+
+    for idx, conflict in enumerate(conflict_details):
+        citation_url = conflict.get("conflict_citation")
+        print(f"DEBUG: Conflict {idx} - citation URL: {citation_url}")
+        if not citation_url:
+            print(f"DEBUG: Skipping conflict {idx} (no citation).")
+            continue
+
+        # Convert state and non-state parties to strings.
+        state_parties = conflict.get("state_parties", "Not recorded")
+        non_state_parties = conflict.get("non_state_parties", "Not recorded")
+
+        document_content = (
+            f"{conflict.get('conflict_name', 'N/A')}\n\n"
+            f"Classification: {conflict.get('conflict_classification', 'N/A')}\n\n"
+            f"Overview: {conflict.get('conflict_overview', 'N/A')}\n\n"
+            f"Applicable IHL: {conflict.get('applicable_ihl_law', 'N/A')}\n\n"
+        )
+        if state_parties.strip():
+            document_content += f"State Actors Party to Conflict: {state_parties}\n\n"
+        if non_state_parties.strip():
+            document_content += f"Non-State Actors Party to Conflict: {non_state_parties}\n"
+
+        citation_to_add = {
+            "type": "citation",
+            "data": {
+                "document": [document_content],
+                "metadata": [{"source": citation_url}],
+                "source": {
+                    "name": conflict.get("conflict_name", "Unknown Conflict"),
+                    "type": "RULAC"  # Add source type to identify it's from RULAC
+                },
+            },
+        }
+
+        # Add the citation to our list
+        citations.append(citation_to_add)
+
+    print(f"DEBUG: Total citations collected from this tool call: {len(citations)}")
+    return citations
+
+
+
+
+def format_rulac_result(data: dict) -> str:
+    """
+    Reformats the raw result from the Neo4j query into a user-friendly presentation.
+    
+    Expected input structure:
+      {
+         "summary": <summary text>,
+         "conflict_details": [
+             {
+                 "conflict_name": <name>,
+                 "conflict_overview": <overview>,
+                 "applicable_ihl_law": <ihl law>,
+                 "conflict_citation": <citation URL>,
+                 "state_parties": <string of state parties>,
+                 "conflict_classification": <classification>,
+                 "non_state_parties": <string of non state parties>
+             },
+             ... additional conflicts ...
+         ]
+      }
+    
+    Returns:
+        A formatted string with sections for research summary and conflict profiles.
+    """
+    summary = data.get("summary", "No summary provided")
+    conflict_details = data.get("conflict_details", [])
+    
+    formatted_conflicts = []
+    for conflict in conflict_details:
+        formatted = (
+            f"Conflict Name: {conflict.get('conflict_name', 'N/A')}\n\n"
+            f"Conflict Classification: {conflict.get('conflict_classification', 'N/A')}\n\n"
+            f"Overview: {conflict.get('conflict_overview', 'N/A')}\n\n"
+            f"Applicable IHL Law: {conflict.get('applicable_ihl_law', 'N/A')}\n\n"
+            f"State Parties: {conflict.get('state_parties', 'None recorded')}\n\n"
+            f"Non-State Parties: {conflict.get('non_state_parties', 'None recorded')}\n"
+            # f"Source Citation: {conflict.get('conflict_citation', 'No Citation Available')}\n"
+        )
+        formatted_conflicts.append(formatted)
+    
+    conflicts_text = "\n---\n".join(formatted_conflicts) if formatted_conflicts else "No conflict details available."
+    
+    formatted_output = (
+        f"# RULAC research summary\n"
+        f"{summary}\n\n"
+        f"# RULAC conflict profiles\n"
+        f"{conflicts_text}"
+    )
+    
+    return formatted_output
+
+
+
+async def async_scraper(url: str, doc_type: str, max_chars: int = None) -> dict:
+    """
+    Asynchronously scrape content from a URL based on document type.
+    
+    Args:
+        url: The URL to scrape
+        doc_type: The type of document ('html' or 'pdf')
+        max_chars: Maximum number of characters to return (optional, defaults to full content)
+        
+    Returns:
+        Dictionary with source URL and content
+    """
+    if doc_type == "html":
+        try:
+            # Create AsyncChromiumLoader
+            loader = AsyncChromiumLoader([url])
+            # Load documents asynchronously
+            docs = await loader.aload()
+            
+            if not docs or len(docs) == 0:
+                logger.error(f"No content loaded from {url}")
+                return {"source": url, "content": AIMessage(content=f"Error: No content loaded from {url}")}
+            
+            # Transform documents with BeautifulSoupTransformer
+            bs_transformer = BeautifulSoupTransformer()
+            docs_transformed = bs_transformer.transform_documents(
+                docs, tags_to_extract=["p", "h1", "h2", "h3", "h4", "h5", "h6"]
+            )
+            
+            # Combine content from all documents if there are multiple
+            combined_content = ""
+            for doc in docs_transformed:
+                # Use BeautifulSoup to extract only the text, removing links
+                soup = BeautifulSoup(doc.page_content, "html.parser")
+                
+                # Remove all link references like [1], [2], etc.
+                for sup in soup.find_all(['sup']):
+                    sup.decompose()
+                
+                # Remove URL references in parentheses and wiki-style links
+                plain_text = soup.get_text(separator=" ", strip=True)
+                # Remove wiki-style links like (/wiki/something)
+                plain_text = re.sub(r'\(/wiki/[^)]+\)', '', plain_text)
+                # Remove URLs in parentheses like (https://...)
+                plain_text = re.sub(r'\(https?://[^)]+\)', '', plain_text)
+                # Remove citation references like [ 1 (#cite_note-something-1) ]
+                plain_text = re.sub(r'\[\s*\d+\s*\(#cite[^]]+\)\s*\]', '', plain_text)
+                # Remove any remaining URLs
+                plain_text = re.sub(r'https?://\S+', '', plain_text)
+                # Clean up multiple spaces
+                plain_text = re.sub(r'\s+', ' ', plain_text).strip()
+                
+                combined_content += plain_text + "\n\n"
+            
+            # Limit content to max_chars if specified
+            if max_chars is not None and len(combined_content) > max_chars:
+                combined_content = combined_content[:max_chars]
+                logger.debug(f"Content truncated to {max_chars} characters")
+            
+            logger.debug(f"Successfully scraped HTML from {url}")
+            return {"source": url, "content": AIMessage(content=combined_content)}
+        except Exception as e:
+            logger.error(f"Error scraping website: {str(e)}")
+            return {"source": url, "content": AIMessage(content=f"Error scraping website: {str(e)}")}
+    elif doc_type == "pdf":
+        try:
+            # For PDF files, use PyPDFLoader (non-async)
+            loader = PyPDFLoader(url)
+            pages = loader.load_and_split()
+            
+            # Extract text directly from pages
+            text_content = ""
+            for page in pages:
+                text_content += page.page_content + "\n\n"
+            
+            # Limit content to max_chars if specified
+            if max_chars is not None and len(text_content) > max_chars:
+                text_content = text_content[:max_chars]
+                logger.debug(f"PDF content truncated to {max_chars} characters")
+            
+            logger.debug(f"Successfully loaded PDF from {url}")
+            return {"source": url, "content": AIMessage(content=text_content)}
+        except Exception as e:
+            logger.error(f"Error scraping PDF: {str(e)}")
+            return {"source": url, "content": AIMessage(content=f"Error scraping PDF: {str(e)}")}
+    else:
+        return {"source": url, "content": AIMessage(content="Unsupported document type, supported types are 'html' and 'pdf'.")}
+
+def truncate_to_n_words(text, token_limit):
+    tokens = text.split()
+    truncated_tokens = tokens[:token_limit]
+    return " ".join(truncated_tokens)
+
+
+def get_base_url(url):
+    """Extract base URL from full URL."""
+    parsed_url = urlparse(url)
+    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+    return base_url
+
+def generate_excerpt(content, max_length=200):
+    """
+    Generate a clean excerpt from content, truncating properly at word boundaries 
+    and removing excess whitespace.
+    """
+    if not content:
+        return ""
+        
+    # Clean up the content
+    clean_content = re.sub(r'\s+', ' ', content).strip()
+    
+    # Return full content instead of truncated excerpt
+    return clean_content
+
+def remove_emojis(text):
+    """Remove emojis from text."""
+    if not text:
+        return ""
+    return "".join(c for c in text if not unicodedata.category(c).startswith("So"))
+
+
+
+
+# TOOLS
+
+@tool
+async def retreive_RULAC_conflict_data_by_state_actor_involvement(
+    research_query: str,
+    target_state_actor_UN_M49_codes: List,
+    target_conflict_types: List,
+) -> dict:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) involving state actors. 
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts per xStateActor by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+
+    ## Steps
+    1. Identify the most relevent research_query from the user query
+    2. Identify the state actor(s) to retreive conflict data
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+
+    ## Example Tool Call Parameters
+    
+    query: "What IAC and Military Occupation conflicts involve state actor France and Russia?"
+    research_query: "IAC and Military Occupation conflicts involving France and Russia"
+    target_state_actor_UN_M49_codes: ["250", "643"]
+    target_conflict_types: ["International Armed Conflict (IAC)", "Military Occupation"]
+
+    query: "What conflicts is USA a party to and what IHL law applies?"
+    research_query: "Retreive RULAC conflict data involving United States of America"
+    target_state_actor_UN_M49_codes: ["840"]
+    target_conflict_types: []
+
+
+
+### Full list of countries and their UN M49 Codes
+
+Important: Each country code is three digits long. Even if the country code starts with a "0", keep the "0" in the code so the code remains three digits in length, e.g. "Bahamas" is "044" not "44", "Botswana is "072"
+
+- Afghanistan ("004")
+- Albania ("008")
+- Antarctica ("010")
+- Algeria ("012")
+- American Samoa ("016")
+- Andorra ("020")
+- Angola ("024")
+- Antigua and Barbuda ("028")
+- Azerbaijan ("031")
+- Argentina ("032")
+- Australia ("036")
+- Austria ("040")
+- Bahamas ("044")
+- Bahrain ("048")
+- Bangladesh ("050")
+- Armenia ("051")
+- Barbados ("052")
+- Belgium ("056")
+- Bermuda ("060")
+- Bhutan ("064")
+- Bolivia (Plurinational State of) ("068")
+- Bosnia and Herzegovina ("070")
+- Botswana ("072")
+- Bouvet Island ("074")
+- Brazil ("076")
+- Belize ("084")
+- British Indian Ocean Territory ("086")
+- Solomon Islands ("090")
+- British Virgin Islands ("092")
+- Brunei Darussalam ("096")
+- Bulgaria ("100")
+- Myanmar ("104")
+- Burundi ("108")
+- Belarus ("112")
+- Cambodia ("116")
+- Cameroon ("120")
+- Canada ("124")
+- Cabo Verde ("132")
+- Cayman Islands ("136")
+- Central African Republic ("140")
+- Sri Lanka ("144")
+- Chad ("148")
+- Chile ("152")
+- China ("156")
+- Christmas Island ("162")
+- Cocos (Keeling) Islands ("166")
+- Colombia ("170")
+- Comoros ("174")
+- Mayotte ("175")
+- Congo ("178")
+- Democratic Republic of the Congo ("180")
+- Cook Islands ("184")
+- Costa Rica ("188")
+- Croatia ("191")
+- Cuba ("192")
+- Cyprus ("196")
+- Czechia ("203")
+- Benin ("204")
+- Denmark ("208")
+- Dominica ("212")
+- Dominican Republic ("214")
+- Ecuador ("218")
+- El Salvador ("222")
+- Equatorial Guinea ("226")
+- Ethiopia ("231")
+- Eritrea ("232")
+- Estonia ("233")
+- Faroe Islands ("234")
+- Falkland Islands (Malvinas) ("238")
+- South Georgia and the South Sandwich Islands ("239")
+- Fiji ("242")
+- Finland ("246")
+- Åland Islands ("248")
+- France ("250")
+- French Guiana ("254")
+- French Polynesia ("258")
+- French Southern Territories ("260")
+- Djibouti ("262")
+- Gabon ("266")
+- Georgia ("268")
+- Gambia ("270")
+- Palestine ("275")
+- Germany ("276")
+- Ghana ("288")
+- Gibraltar ("292")
+- Kiribati ("296")
+- Greece ("300")
+- Greenland ("304")
+- Grenada ("308")
+- Guadeloupe ("312")
+- Guam ("316")
+- Guatemala ("320")
+- Guinea ("324")
+- Guyana ("328")
+- Haiti ("332")
+- Heard Island and McDonald Islands ("334")
+- Holy See ("336")
+- Honduras ("340")
+- Hungary ("348")
+- Iceland ("352")
+- India ("356")
+- Indonesia ("360")
+- Iran ("364")
+- Iraq ("368")
+- Ireland ("372")
+- Israel ("376")
+- Italy ("380")
+- Côte d'Ivoire ("384")
+- Jamaica ("388")
+- Japan ("392")
+- Kazakhstan ("398")
+- Jordan ("400")
+- Kenya ("404")
+- Democratic People's Republic of Korea ("408")
+- Republic of Korea ("410")
+- Kuwait ("414")
+- Kyrgyzstan ("417")
+- Lao People's Democratic Republic ("418")
+- Lebanon ("422")
+- Lesotho ("426")
+- Latvia ("428")
+- Liberia ("430")
+- Libya ("434")
+- Liechtenstein ("438")
+- Lithuania ("440")
+- Luxembourg ("442")
+- Madagascar ("450")
+- Malawi ("454")
+- Malaysia ("458")
+- Maldives ("462")
+- Mali ("466")
+- Malta ("470")
+- Martinique ("474")
+- Mauritania ("478")
+- Mauritius ("480")
+- Mexico ("484")
+- Monaco ("492")
+- Mongolia ("496")
+- Republic of Moldova ("498")
+- Montenegro ("499")
+- Montserrat ("500")
+- Morocco ("504")
+- Mozambique ("508")
+- Oman ("512")
+- Namibia ("516")
+- Nauru ("520")
+- Nepal ("524")
+- Netherlands ("528")
+- Curaçao ("531")
+- Aruba ("533")
+- Sint Maarten (Dutch part) ("534")
+- New Caledonia ("540")
+- Vanuatu ("548")
+- New Zealand ("554")
+- Nicaragua ("558")
+- Niger ("562")
+- Nigeria ("566")
+- Niue ("570")
+- Norfolk Island ("574")
+- Norway ("578")
+- Northern Mariana Islands ("580")
+- United States Minor Outlying Islands ("581")
+- Micronesia (Federated States of) ("583")
+- Marshall Islands ("584")
+- Palau ("585")
+- Pakistan ("586")
+- Panama ("591")
+- Papua New Guinea ("598")
+- Paraguay ("600")
+- Peru ("604")
+- Philippines ("608")
+- Pitcairn ("612")
+- Poland ("616")
+- Portugal ("620")
+- Guinea-Bissau ("624")
+- Timor-Leste ("626")
+- Puerto Rico ("630")
+- Qatar ("634")
+- Réunion ("638")
+- Romania ("642")
+- Russian Federation ("643")
+- Rwanda ("646")
+- Saint Barthélemy ("652")
+- Saint Helena ("654")
+- Saint Kitts and Nevis ("659")
+- Anguilla ("660")
+- Saint Lucia ("662")
+- Saint Martin (French Part) ("663")
+- Saint Pierre and Miquelon ("666")
+- Saint Vincent and the Grenadines ("670")
+- San Marino ("674")
+- Sao Tome and Principe ("678")
+- Saudi Arabia ("682")
+- Senegal ("686")
+- Serbia ("688")
+- Seychelles ("690")
+- Sierra Leone ("694")
+- Singapore ("702")
+- Slovakia ("703")
+- Viet Nam ("704")
+- Slovenia ("705")
+- Somalia ("706")
+- South Africa ("710")
+- Zimbabwe ("716")
+- Spain ("724")
+- South Sudan ("728")
+- Sudan ("729")
+- Western Sahara ("732")
+- Suriname ("740")
+- Svalbard and Jan Mayen Islands ("744")
+- Eswatini ("748")
+- Sweden ("752")
+- Switzerland ("756")
+- Syrian Arab Republic ("760")
+- Tajikistan ("762")
+- Thailand ("764")
+- Togo ("768")
+- Tokelau ("772")
+- Tonga ("776")
+- Trinidad and Tobago ("780")
+- United Arab Emirates ("784")
+- Tunisia ("788")
+- Türkiye ("792")
+- Turkmenistan ("795")
+- Turks and Caicos Islands ("796")
+- Tuvalu ("798")
+- Uganda ("800")
+- Ukraine ("804")
+- North Macedonia ("807")
+- Egypt ("818")
+- United Kingdom of Great Britain and Northern Ireland ("826")
+- Guernsey ("831")
+- Jersey ("832")
+- Isle of Man ("833")
+- United Republic of Tanzania ("834")
+- United States of America ("840")
+- United States Virgin Islands ("850")
+- Burkina Faso ("854")
+- Uruguay ("858")
+- Uzbekistan ("860")
+- Venezuela ("862")
+- Wallis and Futuna Islands ("876")
+- Samoa ("882")
+- Yemen ("887")
+- Zambia ("894")
+
+Note:
+- 729 for modern Sudan after the separation of South Sudan in 2011
+- 275 for Palestine
+- 804 for Ukraine
+- 356 for India
+
+    
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :param target_state_actor_UN_M49_codes: List of UN_M49 codes for identified state actors in query
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+        
+    # Prepare the parameters for the query
+    params = {
+        "target_state_actor_UN_M49_codes": target_state_actor_UN_M49_codes,
+        "target_conflict_types": target_conflict_types,
+    }
+
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_by_StateActor.PROMPT
+
+    # DEBUGGING statement
+    # Create a debug version of the query with parameters substituted
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            return {"result": "No RULAC data found.", "citations": []}
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Format the result for display
+        cleanedToolMessage = format_rulac_result(research_result)
+
+        # Collect citations
+        citations = collect_RULAC_citations(research_result)
+
+        # Return both the formatted result and citations
+        return {
+            "result": cleanedToolMessage,
+            "citations": citations
+        }
+
+    except Exception as e:
+        error_message = f"Error connecting to Neo4j: {e}"
+        print(f"DEBUG: {error_message}")
+        return {
+            "result": f"Error retrieving conflict data: {error_message}",
+            "citations": []
+        }
+
+
+@tool
+async def retreive_RULAC_conflict_data_by_non_state_actor_involvement(
+    research_query: str,
+    target_non_state_actor_name_and_aliases: List,
+) -> dict:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) involving non-state actors. 
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts involving xNonStateActor.
+
+    ## Steps
+    1. Identify the most relevent research_query from the user query
+    2. Identify the non-state actor mentioned in the research question and define a list of alterntate spellings, aliases and acroynms for the non-state actor(s) in `target_non_state_actor_name_and_aliases`. This is to ensure data retreival is flexible enough.
+
+
+    ## Example Tool Call Parameters
+    
+    query: "What conflicts involve Hezbollah?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["Hezbollah", "Hizbollah, "Hizbullah", "Hizballah", "Party of God"]
+
+    query: "What IAC and Military Occupation conflicts involve non-state actors ISIS?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["ISIS", "Islamic State", "Daesh"]
+
+    query: "How many conflicts involve ISIS and what IHL law applies?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["ISIS", "Islamic State", "Daesh"]
+
+    query: "Are there more conflicts involving Hezbollah or involving FARC?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["Hezbollah", "Hizbollah, "Hizbullah", "Hizballah", "Party of God", "Revolutionary Armed Forces of Colombia (FARC)", "Revolutionary Armed Forces", "FARC", "Fuerzas Armadas Revolucionarias de Colombia"]
+
+
+    :param query: The initial user research query to retreive conflict data. Must include enough context for retreival.
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :param target_non_state_actor_name_and_aliases: List of spellings for identified non-state actors in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+
+    # Print status instead of emitting
+    console.print(Panel.fit("📚 Gathering data on non-state actor conflicts...", style="black on yellow", border_style="yellow"))
+
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_by_NonStateActor.PROMPT
+
+    # Prepare the parameters for the query
+    params = {
+        "target_non_state_actor_name_and_aliases": target_non_state_actor_name_and_aliases
+    }
+
+    # DEBUGGING statement
+    # Create a debug version of the query with parameters substituted
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            return {"result": "No RULAC data found.", "citations": []}
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Format the result for display
+        cleanedToolMessage = format_rulac_result(research_result)
+
+        # Debugging info
+        panel = Panel(
+            Markdown(cleanedToolMessage),
+            style="green on white",
+            border_style="black",
+            title="[TOOL INFO] RULAC CLEANED TOOL RESULTS",
+            title_align="left",
+            expand=True,
+        )            
+        console.print(panel)
+
+        # Collect citations
+        citations = collect_RULAC_citations(research_result)
+
+        # Return both the formatted result and citations
+        return {
+            "result": cleanedToolMessage,
+            "citations": citations
+        }
+
+    except Exception as e:
+        error_message = f"Error connecting to Neo4j: {e}"
+        print(f"DEBUG: {error_message}")
+        console.print(Panel.fit(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error retrieving conflict data: {error_message}",
+            "citations": []
+        }
+
+
+@tool
+async def retreive_RULAC_conflict_data_by_conflict_taking_place_in_country(
+    research_query: str,
+    target_country_UN_M49_codes: List,
+    target_conflict_types: List,
+) -> dict:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) taking place in specific countries. 
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts per country by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+
+    ## Steps
+    1. Identify the most relevent research_query from the user query
+    2. Identify the country or countries where the conflicts take place
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+
+    ## Example Tool Call Parameters
+    
+    query: "What IAC and Military Occupation conflicts are taking place in France and Russia?"
+    research_query: "Retreive RULAC conflict data for conflicts taking place in France and Russia classified as 'International Armed Conflict (IAC)' and 'Military Occupation'"
+    target_country_UN_M49_codes: ["250", "643"]
+    target_conflict_types: ["International Armed Conflict (IAC)", "Military Occupation"]
+
+    query: "What conflicts are taking place in the USA and what IHL law applies?"
+    research_query: "Retreive RULAC conflict data for conflicts taking place in United States of America"
+    target_country_UN_M49_codes: ["840"]
+    target_conflict_types: []
+
+
+
+### Full list of countries and their UN M49 Codes
+
+Important: Each country code is three digits long. Even if the country code starts with a "0", keep the "0" in the code so the code remains three digits in length, e.g. "Bahamas" is "044" not "44", "Botswana is "072"
+
+- Afghanistan ("004")
+- Albania ("008")
+- Antarctica ("010")
+- Algeria ("012")
+- American Samoa ("016")
+- Andorra ("020")
+- Angola ("024")
+- Antigua and Barbuda ("028")
+- Azerbaijan ("031")
+- Argentina ("032")
+- Australia ("036")
+- Austria ("040")
+- Bahamas ("044")
+- Bahrain ("048")
+- Bangladesh ("050")
+- Armenia ("051")
+- Barbados ("052")
+- Belgium ("056")
+- Bermuda ("060")
+- Bhutan ("064")
+- Bolivia (Plurinational State of) ("068")
+- Bosnia and Herzegovina ("070")
+- Botswana ("072")
+- Bouvet Island ("074")
+- Brazil ("076")
+- Belize ("084")
+- British Indian Ocean Territory ("086")
+- Solomon Islands ("090")
+- British Virgin Islands ("092")
+- Brunei Darussalam ("096")
+- Bulgaria ("100")
+- Myanmar ("104")
+- Burundi ("108")
+- Belarus ("112")
+- Cambodia ("116")
+- Cameroon ("120")
+- Canada ("124")
+- Cabo Verde ("132")
+- Cayman Islands ("136")
+- Central African Republic ("140")
+- Sri Lanka ("144")
+- Chad ("148")
+- Chile ("152")
+- China ("156")
+- Christmas Island ("162")
+- Cocos (Keeling) Islands ("166")
+- Colombia ("170")
+- Comoros ("174")
+- Mayotte ("175")
+- Congo ("178")
+- Democratic Republic of the Congo ("180")
+- Cook Islands ("184")
+- Costa Rica ("188")
+- Croatia ("191")
+- Cuba ("192")
+- Cyprus ("196")
+- Czechia ("203")
+- Benin ("204")
+- Denmark ("208")
+- Dominica ("212")
+- Dominican Republic ("214")
+- Ecuador ("218")
+- El Salvador ("222")
+- Equatorial Guinea ("226")
+- Ethiopia ("231")
+- Eritrea ("232")
+- Estonia ("233")
+- Faroe Islands ("234")
+- Falkland Islands (Malvinas) ("238")
+- South Georgia and the South Sandwich Islands ("239")
+- Fiji ("242")
+- Finland ("246")
+- Åland Islands ("248")
+- France ("250")
+- French Guiana ("254")
+- French Polynesia ("258")
+- French Southern Territories ("260")
+- Djibouti ("262")
+- Gabon ("266")
+- Georgia ("268")
+- Gambia ("270")
+- Palestine ("275")
+- Germany ("276")
+- Ghana ("288")
+- Gibraltar ("292")
+- Kiribati ("296")
+- Greece ("300")
+- Greenland ("304")
+- Grenada ("308")
+- Guadeloupe ("312")
+- Guam ("316")
+- Guatemala ("320")
+- Guinea ("324")
+- Guyana ("328")
+- Haiti ("332")
+- Heard Island and McDonald Islands ("334")
+- Holy See ("336")
+- Honduras ("340")
+- Hungary ("348")
+- Iceland ("352")
+- India ("356")
+- Indonesia ("360")
+- Iran ("364")
+- Iraq ("368")
+- Ireland ("372")
+- Israel ("376")
+- Italy ("380")
+- Côte d'Ivoire ("384")
+- Jamaica ("388")
+- Japan ("392")
+- Kazakhstan ("398")
+- Jordan ("400")
+- Kenya ("404")
+- Democratic People's Republic of Korea ("408")
+- Republic of Korea ("410")
+- Kuwait ("414")
+- Kyrgyzstan ("417")
+- Lao People's Democratic Republic ("418")
+- Lebanon ("422")
+- Lesotho ("426")
+- Latvia ("428")
+- Liberia ("430")
+- Libya ("434")
+- Liechtenstein ("438")
+- Lithuania ("440")
+- Luxembourg ("442")
+- Madagascar ("450")
+- Malawi ("454")
+- Malaysia ("458")
+- Maldives ("462")
+- Mali ("466")
+- Malta ("470")
+- Martinique ("474")
+- Mauritania ("478")
+- Mauritius ("480")
+- Mexico ("484")
+- Monaco ("492")
+- Mongolia ("496")
+- Republic of Moldova ("498")
+- Montenegro ("499")
+- Montserrat ("500")
+- Morocco ("504")
+- Mozambique ("508")
+- Oman ("512")
+- Namibia ("516")
+- Nauru ("520")
+- Nepal ("524")
+- Netherlands ("528")
+- Curaçao ("531")
+- Aruba ("533")
+- Sint Maarten (Dutch part) ("534")
+- New Caledonia ("540")
+- Vanuatu ("548")
+- New Zealand ("554")
+- Nicaragua ("558")
+- Niger ("562")
+- Nigeria ("566")
+- Niue ("570")
+- Norfolk Island ("574")
+- Norway ("578")
+- Northern Mariana Islands ("580")
+- United States Minor Outlying Islands ("581")
+- Micronesia (Federated States of) ("583")
+- Marshall Islands ("584")
+- Palau ("585")
+- Pakistan ("586")
+- Panama ("591")
+- Papua New Guinea ("598")
+- Paraguay ("600")
+- Peru ("604")
+- Philippines ("608")
+- Pitcairn ("612")
+- Poland ("616")
+- Portugal ("620")
+- Guinea-Bissau ("624")
+- Timor-Leste ("626")
+- Puerto Rico ("630")
+- Qatar ("634")
+- Réunion ("638")
+- Romania ("642")
+- Russian Federation ("643")
+- Rwanda ("646")
+- Saint Barthélemy ("652")
+- Saint Helena ("654")
+- Saint Kitts and Nevis ("659")
+- Anguilla ("660")
+- Saint Lucia ("662")
+- Saint Martin (French Part) ("663")
+- Saint Pierre and Miquelon ("666")
+- Saint Vincent and the Grenadines ("670")
+- San Marino ("674")
+- Sao Tome and Principe ("678")
+- Saudi Arabia ("682")
+- Senegal ("686")
+- Serbia ("688")
+- Seychelles ("690")
+- Sierra Leone ("694")
+- Singapore ("702")
+- Slovakia ("703")
+- Viet Nam ("704")
+- Slovenia ("705")
+- Somalia ("706")
+- South Africa ("710")
+- Zimbabwe ("716")
+- Spain ("724")
+- South Sudan ("728")
+- Sudan ("729")
+- Western Sahara ("732")
+- Suriname ("740")
+- Svalbard and Jan Mayen Islands ("744")
+- Eswatini ("748")
+- Sweden ("752")
+- Switzerland ("756")
+- Syrian Arab Republic ("760")
+- Tajikistan ("762")
+- Thailand ("764")
+- Togo ("768")
+- Tokelau ("772")
+- Tonga ("776")
+- Trinidad and Tobago ("780")
+- United Arab Emirates ("784")
+- Tunisia ("788")
+- Türkiye ("792")
+- Turkmenistan ("795")
+- Turks and Caicos Islands ("796")
+- Tuvalu ("798")
+- Uganda ("800")
+- Ukraine ("804")
+- North Macedonia ("807")
+- Egypt ("818")
+- United Kingdom of Great Britain and Northern Ireland ("826")
+- Guernsey ("831")
+- Jersey ("832")
+- Isle of Man ("833")
+- United Republic of Tanzania ("834")
+- United States of America ("840")
+- United States Virgin Islands ("850")
+- Burkina Faso ("854")
+- Uruguay ("858")
+- Uzbekistan ("860")
+- Venezuela ("862")
+- Wallis and Futuna Islands ("876")
+- Samoa ("882")
+- Yemen ("887")
+- Zambia ("894")
+
+Note:
+- 729 for modern Sudan after the separation of South Sudan in 2011
+- 275 for Palestine
+- 804 for Ukraine
+- 356 for India
+
+    
+
+
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+
+    :param target_country_UN_M49_codes: List of UN_M49 codes for identified countries in query
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+    
+    # Print status instead of emitting
+    console.print(Panel.fit("📚 Gathering data on conflicts in specified countries...", style="black on yellow", border_style="yellow"))
+
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_taking_place_country.PROMPT
+
+    # Prepare the parameters for the query
+    params = {
+        "target_country_UN_M49_codes": target_country_UN_M49_codes,
+        "target_conflict_types": target_conflict_types,
+    }
+
+    # DEBUGGING statement
+    # Create a debug version of the query with parameters substituted
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            return {"result": "No RULAC data found.", "citations": []}
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Format the result for display and return it
+        cleanedToolMessage = format_rulac_result(research_result)
+
+        # Debugging info
+        panel = Panel(
+            Markdown(cleanedToolMessage),
+            style="green on white",
+            border_style="black",
+            title="[TOOL INFO] RULAC CLEANED TOOL RESULTS",
+            title_align="left",
+            expand=True,
+        )            
+        console.print(panel)
+
+        # Collect citations
+        citations = collect_RULAC_citations(research_result)
+
+        # Return both the formatted result and citations
+        return {
+            "result": cleanedToolMessage,
+            "citations": citations
+        }
+
+    except Exception as e:
+        error_message = f"Error connecting to Neo4j: {e}"
+        print(f"DEBUG: {error_message}")
+        console.print(Panel.fit(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error retrieving conflict data: {error_message}",
+            "citations": []
+        }
+
+
+@tool
+async def retreive_RULAC_conflict_data_by_organization(
+    research_query: str,
+    target_organization_name: List,
+    target_conflict_types: List,
+) -> dict:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) involving political and economic organizations. 
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts involving xOrganization members as a state party to active conflict by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+    This tool can ONLY retreive information regarding the following Organizations: "European Union", "African Union", "G7", "BRICS", "NATO", "ASEAN"
+
+    ## Steps
+    1. Identify the most relevant research_query from the user query
+    2. Identify the organization(s) to retrieve conflict data for
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+    ## Example Tool Call Parameters
+    
+    query: "What IAC conflicts involve BRICS members?",
+    research_query: "Retrieve RULAC conflict data for BRICS members",
+    target_organization_name: ["BRICS"]
+    target_conflict_types: ["International Armed Conflict (IAC)"]
+
+    query: "What conflicts involve NATO?",
+    research_query: "Retrieve RULAC conflict data for NATO"
+    target_organization_name: ["NATO"]
+    target_conflict_types: []
+
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+
+    :param target_organization_name: List of spellings for identified non-state actors in query
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+
+    # Print status
+    console.print(Panel.fit("📚 Gathering data on organization conflicts...", style="black on yellow", border_style="yellow"))
+
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_by_org.PROMPT
+
+    # Prepare the parameters for the query
+    params = {
+        "target_organization_name": target_organization_name,
+        "target_conflict_types": target_conflict_types
+    }
+
+    # Define the prewritten Cypher query. Note the use of $parameter_name for parameter substitution.
+ 
+    # target_organization_name
+ 
+
+    # DEBUGGING statement
+    # Create a debug version of the query with parameters substituted
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            return {"result": "No RULAC data found.", "citations": []}
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Format the result for display
+        cleanedToolMessage = format_rulac_result(research_result)
+
+        # Debug info
+        panel = Panel(
+            Markdown(cleanedToolMessage),
+            style="green on white",
+            border_style="black",
+            title="[TOOL INFO] RULAC CLEANED TOOL RESULTS",
+            title_align="left",
+            expand=True,
+        )            
+        console.print(panel)
+
+        # Collect citations
+        citations = collect_RULAC_citations(research_result)
+
+        # Return both the formatted result and citations
+        return {
+            "result": cleanedToolMessage,
+            "citations": citations
+        }
+
+    except Exception as e:
+        error_message = f"Error connecting to Neo4j: {e}"
+        print(f"DEBUG: {error_message}")
+        console.print(Panel.fit(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error retrieving conflict data: {error_message}",
+            "citations": []
+        }
+
+
+
+@tool
+async def retreive_RULAC_conflict_data_by_region(
+    research_query: str,
+    target_region_UN_M49_codes: List,
+    target_conflict_types: List,
+) -> dict:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) in specific geographic regions.
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict.
+
+    This tool retreives all conflicts in a region by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+    ## Steps
+    1. Identify the most relevant research_query from the user query
+    2. Identify the region(s) to retrieve conflict data for
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+
+    
+#### Official UN M49 Geo Regions and codes
+Regions
+  ├── Africa (002)
+  │   ├── Northern Africa / North Africa (015)
+  │   ├── Sub-Saharan Africa (202)
+  │   │   ├── Eastern Africa / East Africa (014)
+  │   │   ├── Middle Africa (017)
+  │   │   ├── Southern Africa (018)
+  │   │   └── Western Africa / West Africa (011)
+  ├── Americas (019)
+  │   │   ├── Northern America (021)
+  │   │   ├── Caribbean (029)
+  │   │   └── Central America (013)
+  │   └── Latin America / Latin America and the Caribbean (419)
+  │       ├── Caribbean (029)
+  │       ├── Central America (013)
+  │       └── South America (005)
+  ├── Antarctica (010)
+  ├── Asia (142)
+  │   ├── Central Asia (143)
+  │   ├── Eastern Asia / East Asia (030)
+  │   ├── South-Eastern Asia / SouthEast Asia (035)
+  │   ├── Southern Asia (034)
+  │   └── Western Asia / West Asia (145)
+  ├── Europe (150)
+  │   ├── Eastern Europe / East Europe (151)
+  │   ├── Northern Europe / North Europe (154)
+  │   ├── Southern Europe / South Europe (039)
+  │   └── Western Europe / West Europe (155)
+  └── Oceania (009)
+
+
+    ## Example Tool Call Parameters
+    
+    query: "How does the number of conflicts taking place in Eastern Africa region compare to those in North Africa region?"
+    research_query: "Retreive RULAC conflict data for Eastern Africa and North Africa regions'"
+    target_region_UN_M49_codes: ["014", "015"]
+    target_conflict_types: []
+
+    query: "What IAC conflicts are taking place in Europe?"
+    research_query: "Retreive RULAC conflict data for conflicts classified as IAC in Europe region"
+    target_region_UN_M49_codes: ["150"]
+    target_conflict_types: ["International Armed Conflict (IAC)"]
+
+
+
+
+    
+
+
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+
+    :param target_region_UN_M49_codes: List of UN_M49 Geographic Region codes
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+
+    # Print status instead of emitting
+    console.print(Panel.fit("📚 Gathering data on conflicts by region...", style="black on yellow", border_style="yellow"))
+
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_by_Region.PROMPT
+
+    # Prepare the parameters for the query
+    params = {
+        "target_region_UN_M49_codes": target_region_UN_M49_codes,
+        "target_conflict_types": target_conflict_types,
+    }
+
+    # Define the prewritten Cypher query. Note the use of $parameter_name for parameter substitution.
+ 
+    # target_non_state_actor_name_and_aliases
+ 
+
+
+    # DEBUGGING statement
+    # Create a debug version of the query with parameters substituted
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            return {"result": "No RULAC data found.", "citations": []}
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Format the result for display
+        cleanedToolMessage = format_rulac_result(research_result)
+
+        # Debug info
+        panel = Panel(
+            Markdown(cleanedToolMessage),
+            style="green on white",
+            border_style="black",
+            title="[TOOL INFO] RULAC CLEANED TOOL RESULTS",
+            title_align="left",
+            expand=True,
+        )            
+        console.print(panel)
+
+        # Collect citations
+        citations = collect_RULAC_citations(research_result)
+
+        # Return both the formatted result and citations
+        return {
+            "result": cleanedToolMessage,
+            "citations": citations
+        }
+
+    except Exception as e:
+        error_message = f"Error connecting to Neo4j: {e}"
+        print(f"DEBUG: {error_message}")
+        console.print(Panel.fit(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error retrieving conflict data: {error_message}",
+            "citations": []
+        }
+
+
+
+
+# TESTING SUITES
+
+# An async event emitter that prints out any events emitted by the tool.
+async def event_emitter(event):
+    print("Event emitted:", event)
+    description = event.get("data", {}).get("description", "No description available")  # Safely extract description
+        
+    panel = Panel.fit(description, style="black on yellow", border_style="yellow")
+        
+    # Print nicely formatted box to console
+    console.print(panel)
+
+async def test_by_state_actor_involvement():
+    """Test function for state actor involvement tool"""
+    console.print(Panel.fit("Testing RULAC State Actor Involvement Tool", style="bold cyan"))
+    
+    test_scenarios = [
+        {
+            "name": "State Actor: France (IAC Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for France",
+                "target_state_actor_UN_M49_codes": ["250"],
+                "target_conflict_types": ["International Armed Conflict (IAC)"],
+            },
+        },
+        {
+            "name": "State Actor: USA (No Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for USA",
+                "target_state_actor_UN_M49_codes": ["840"],
+                "target_conflict_types": [],
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        console.print("\n")
+        console.print(Panel(f"[bold cyan]{scenario['name']}[/]", expand=False))
+        params = scenario["params"]
+        try:
+            console.print(f"Running query: [bold yellow]\"{params['research_query']}\"[/]")
+            result = await retreive_RULAC_conflict_data_by_state_actor_involvement.ainvoke({
+                "research_query": params["research_query"],
+                "target_state_actor_UN_M49_codes": params["target_state_actor_UN_M49_codes"],
+                "target_conflict_types": params["target_conflict_types"]
+            })
+            
+            # Display result content
+            if isinstance(result, dict) and "result" in result:
+                console.print(Panel(
+                    Markdown(result["result"]),
+                    title="[bold green]RESULT[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                
+                # Display citation information
+                if "citations" in result and result["citations"]:
+                    console.print(f"[bold green]Found {len(result['citations'])} citations[/]")
+                    for i, citation in enumerate(result["citations"], 1):
+                        source_name = citation.get("data", {}).get("source", {}).get("name", "Unknown")
+                        source_url = citation.get("data", {}).get("metadata", [{}])[0].get("source", "No URL")
+                        console.print(f"[dim]Citation {i}: {source_name} - {source_url}[/]")
+            else:
+                # Handle old format for backward compatibility
+                console.print(Panel(
+                    Markdown(str(result)),
+                    title="[bold green]RESULT (old format)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                
+        except Exception as e:
+            console.print(f"[bold red]ERROR during scenario:[/] {scenario['name']} -> {str(e)}")
+            import traceback
+            console.print_exception()
+
+async def test_by_non_state_actor_involvement():
+    print("\n=== Testing retreive_RULAC_conflict_data_by_non_state_actor_involvement ===")
+    # Define test scenarios for non-state actor involvement.
+    test_scenarios = [
+        {
+            "name": "Non-State Actor: Hezbollah",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for Hezbollah",
+                "target_non_state_actor_name_and_aliases": [
+                    "Hezbollah", "Hizbollah", "Hizbullah", "Hizballah", "Party of God"
+                ],
+            },
+        },
+        {
+            "name": "Non-State Actor: ISIS",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for ISIS",
+                "target_non_state_actor_name_and_aliases": [
+                    "ISIS", "Islamic State", "Daesh"
+                ],
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        print(f"\n--- {scenario['name']} ---")
+        params = scenario["params"]
+        try:
+            # Invoke the non-state actor tool by passing a single dictionary.
+            result = await retreive_RULAC_conflict_data_by_non_state_actor_involvement.ainvoke({
+                "research_query": params["research_query"],
+                "target_non_state_actor_name_and_aliases": params["target_non_state_actor_name_and_aliases"]
+            })
+            # print("Result:", result)
+        except Exception as e:
+            print("Error during scenario:", scenario["name"], "->", e)
+
+
+async def test_by_organizational_involvement():
+    print("\n=== Testing retreive_RULAC_conflict_data_by_organization ===")
+    # Define test scenarios for non-state actor involvement.
+    test_scenarios = [
+        {
+            "name": "Organization: BRICS",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for BRICS members",
+                "target_organization_name": ["BRICS"],
+                "target_conflict_types": ["International Armed Conflict (IAC)"],
+
+            },
+        },
+        # {
+        #     "name": "Organization: NATO",
+        #     "params": {
+        #         "research_query": "Retrieve RULAC conflict data for NATO",
+        #         "target_organization_name": ["NATO"],
+        #         "target_conflict_types": [],
+        #     },
+        # },
+        # {
+        #     "name": "Organization: Non-existent",
+        #     "params": {
+        #         "research_query": "Retrieve RULAC conflict data for OECD",
+        #         "target_organization_name": ["OECD"],
+        #         "target_conflict_types": [],
+        #     },
+        # },
+    ]
+
+    for scenario in test_scenarios:
+        print(f"\n--- {scenario['name']} ---")
+        params = scenario["params"]
+        try:
+            # Invoke the non-state actor tool by passing a single dictionary.
+            result = await retreive_RULAC_conflict_data_by_organization.ainvoke({
+                "research_query": params["research_query"],
+                "target_organization_name": params["target_organization_name"],
+                "target_conflict_types": params["target_conflict_types"]
+            })
+            # print("Result:", result)
+        except Exception as e:
+            print("Error during scenario:", scenario["name"], "->", e)
+
+# retreive_RULAC_conflict_data_by_region
+
+async def test_by_conflict_taking_place_in_country():
+    print("\n=== Testing retreive_RULAC_conflict_data_by_conflict_taking_place_in_country ===")
+    # Define test scenarios for state actor involvement.
+    test_scenarios = [
+        {
+            "name": "Country: France (IAC Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for France",
+                "target_country_UN_M49_codes": ["250"],
+                "target_conflict_types": ["International Armed Conflict (IAC)"],
+            },
+        },
+        {
+            "name": "Country: USA (No Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for USA",
+                "target_country_UN_M49_codes": ["840"],
+                "target_conflict_types": [],
+            },
+        },
+             {
+            "name": "Country: Ukraine (No Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict taking place in Ukraine",
+                "target_country_UN_M49_codes": ["804"],
+                "target_conflict_types": [],
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        print(f"\n--- {scenario['name']} ---")
+        params = scenario["params"]
+        try:
+            # Use the tool's async invoke method to pass a single dictionary of inputs.
+            result = await retreive_RULAC_conflict_data_by_conflict_taking_place_in_country.ainvoke({
+                "research_query": params["research_query"],
+                "target_country_UN_M49_codes": params["target_country_UN_M49_codes"],
+                "target_conflict_types": params["target_conflict_types"]
+            })
+            # print("Result:", result)
+        except Exception as e:
+            print("Error during scenario:", scenario["name"], "->", e)
+
+
+async def test_by_region():
+    print("\n=== Testing retreive_RULAC_conflict_data_by_region ===")
+    # Define test scenarios for state actor involvement.
+    test_scenarios = [
+        {
+            "name": "Region: Eastern Africa and North Africa (No Filters)",
+            "params": {
+                "research_query": "Retreive RULAC conflict data for Eastern Africa and North Africa regions",
+                "target_region_UN_M49_codes": ["014", "015"],
+                "target_conflict_types": [],
+            },
+        },
+        # {
+        #     "name": "Region: Europe (IAC Filter)",
+        #     "params": {
+        #         "query": "What IAC conflicts are taking place in Europe?",
+        #         "research_query": "Retreive RULAC conflict data for conflicts classified as IAC in Europe region",
+        #         "target_region_UN_M49_codes": ["150"],
+        #         "target_conflict_types": ["International Armed Conflict (IAC)"],
+        #     },
+        # },
+    ]
+
+
+    for scenario in test_scenarios:
+        print(f"\n--- {scenario['name']} ---")
+        params = scenario["params"]
+        try:
+            # Use the tool's async invoke method to pass a single dictionary of inputs.
+            result = await retreive_RULAC_conflict_data_by_region.ainvoke({
+                "research_query": params["research_query"],
+                "target_region_UN_M49_codes": params["target_region_UN_M49_codes"],
+                "target_conflict_types": params["target_conflict_types"]
+            })
+            # print("Result:", result)
+        except Exception as e:
+            print("Error during scenario:", scenario["name"], "->", e)
+
+@tool
+async def get_Conflict_Classification_Methodology(
+    research_query: str,
+) -> dict:
+    """
+    Returns detailed information about how RULAC classifies conflicts using International Humanitarian Law criteria.
+    This information is retrieved from a markdown file containing RULAC's methodology for conflict classification.
+
+    Use this tool when the user wants to know how RULAC determines if a situation is an armed conflict or for general information about RULAC's conflict classification methodology.
+    Do not use this tool if the user wants to know about the specific classification of a conflict.
+    
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :return: A dictionary with "result" string containing the methodology information and "citations" list of citation objects
+    """
+    try:
+        methodology_info = baselineClassificationMethodology.PROMPT
+
+        # Format the output using Rich
+        panel = Panel(
+            Markdown(methodology_info),
+            style="green on white",
+            border_style="black",
+            title="[TOOL INFO] RULAC CONFLICT CLASSIFICATION METHODOLOGY",
+            title_align="left",
+            expand=True,
+        )
+        console.print(panel)
+        
+        # Create citation for the methodology information
+        citation_url = "https://www.rulac.org/classification"
+        source_name = "RULAC - Conflict Classification Methodology"
+        
+        # Create a basic citation object
+        citation = {
+            "data": {
+                "source": {
+                    "name": source_name,
+                    "type": "RULAC"
+                },
+                "metadata": [
+                    {
+                        "source": citation_url
+                    }
+                ]
+            }
+        }
+        
+        return {
+            "result": methodology_info,
+            "citations": [citation]
+        }
+    except Exception as e:
+            console.print(f"[bold red]ERROR during scenario: -> {str(e)}")
+            import traceback
+            console.print_exception()
+
+@tool
+async def get_International_Humanitarian_Legal_Framework(
+    research_query: str,
+) -> dict:
+    """
+    Returns general information about the International Humanitarian Law (IHL) legal framework.
+    This information is retrieved from a markdown file containing essential knowledge about IHL treaties, principles, and implementation.
+
+    Use this tool when the user wants to know more about IHL, its sources, and how it applies to different conflict types.
+    Do not use this tool if the user wants to know about the specific classification of a conflict.
+    
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :return: A dictionary with "result" string containing the IHL framework information and "citations" list of citation objects
+    """
+    try:
+        ihl_info = baselineIHLLegalFramework.PROMPT
+
+        # Format the output using Rich
+        panel = Panel(
+            Markdown(ihl_info),
+            style="green on white",
+            border_style="black",
+            title="[TOOL INFO] INTERNATIONAL HUMANITARIAN LAW LEGAL FRAMEWORK",
+            title_align="left",
+            expand=True,
+        )
+        console.print(panel)
+        
+        # Add hardcoded citation for the IHL framework information
+        citation_url = "https://www.rulac.org/legal-framework"
+        source_name = "RULAC - International Humanitarian Law Framework"
+        
+        # Create a basic citation object
+        citation = {
+            "data": {
+                "source": {
+                    "name": source_name
+                },
+                "metadata": [
+                    {
+                        "source": citation_url
+                    }
+                ]
+            }
+        }
+        
+        return {
+            "result": ihl_info,
+            "citations": [citation]
+        }
+    except Exception as e:
+        error_message = f"Error reading IHL legal framework information: {e}"
+        print(f"DEBUG: {error_message}")
+        console.print(Panel.fit(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error retrieving IHL framework information: {error_message}",
+            "citations": []
+        }
+
+async def test_classification_methodology():
+    print("\n=== Testing get_Conflict_Classification_Methodology ===")
+    test_scenarios = [
+        {
+            "name": "Classification Methodology Request",
+            "params": {
+                "research_query": "How does RULAC classify conflicts?",
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        print(f"\n--- {scenario['name']} ---")
+        params = scenario["params"]
+        try:
+            result = await get_Conflict_Classification_Methodology.ainvoke(
+                {"research_query": params["research_query"]}
+            )
+            
+            # Display result content
+            if isinstance(result, dict) and "result" in result:
+                console.print(Panel(
+                    Markdown(result["result"][:500] + "..." if len(result["result"]) > 500 else result["result"]),
+                    title="[bold green]RESULT (PREVIEW)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                
+                # Display citation information
+                if "citations" in result and result["citations"]:
+                    console.print(f"[bold green]Found {len(result['citations'])} citations[/]")
+                    for i, citation in enumerate(result["citations"], 1):
+                        source_name = citation.get("data", {}).get("source", {}).get("name", "Unknown")
+                        source_url = citation.get("data", {}).get("metadata", [{}])[0].get("source", "No URL")
+                        console.print(f"[dim]Citation {i}: {source_name} - {source_url}[/]")
+            else:
+                console.print(Panel(
+                    Markdown(str(result)[:500] + "..." if len(str(result)) > 500 else str(result)),
+                    title="[bold green]RESULT (PREVIEW)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+        except Exception as e:
+            print("Error during scenario:", scenario["name"], "->", e)
+            import traceback
+            traceback.print_exc()
+
+async def test_ihl_legal_framework():
+    print("\n=== Testing get_International_Humanitarian_Legal_Framework ===")
+    test_scenarios = [
+        {
+            "name": "IHL Framework Request",
+            "params": {
+                "research_query": "What is international humanitarian law?",
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        print(f"\n--- {scenario['name']} ---")
+        params = scenario["params"]
+        try:
+    
+            result = await get_International_Humanitarian_Legal_Framework.ainvoke(
+                {"research_query": params["research_query"]}
+            )
+                        # Display result content
+            if isinstance(result, dict) and "result" in result:
+                console.print(Panel(
+                    Markdown(result["result"][:500] + "..." if len(result["result"]) > 500 else result["result"]),
+                    title="[bold green]RESULT (PREVIEW)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                
+                # Display citation information
+                if "citations" in result and result["citations"]:
+                    console.print(f"[bold green]Found {len(result['citations'])} citations[/]")
+                    for i, citation in enumerate(result["citations"], 1):
+                        source_name = citation.get("data", {}).get("source", {}).get("name", "Unknown")
+                        source_url = citation.get("data", {}).get("metadata", [{}])[0].get("source", "No URL")
+                        console.print(f"[dim]Citation {i}: {source_name} - {source_url}[/]")
+            else:
+                console.print(Panel(
+                    Markdown(str(result)[:500] + "..." if len(str(result)) > 500 else str(result)),
+                    title="[bold green]RESULT (PREVIEW)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+        except Exception as e:
+            print("Error during scenario:", scenario["name"], "->", e)
+            import traceback
+            traceback.print_exc()
+
+@tool
+async def get_website(
+    url: str,
+    doc_type: str = "html",
+) -> dict:
+    """
+    Fetches and processes content from a specified URL.
+    
+    For HTML pages, it extracts the main content, removing navigation elements and irrelevant parts.
+    For PDFs, it extracts and processes all text content.
+     Use this tool when you need to extract information from a specific website or document that has been mentioned or referenced.
+    
+    :param url: URL of the web page or PDF to retrieve
+    :param doc_type: Type of document to retrieve (either "html" or "pdf")
+    :return: A dictionary with "result" string containing processed content from the URL and "citations" list
+    """
+    
+    try:
+        console.print(Panel(f"Loading website contents from URL: {url}", style="black on yellow", border_style="yellow"))
+
+        # For regular web pages
+        if doc_type.lower() == "html":
+            content = ""
+            links = []
+
+            try:
+                console.print(Panel(f"Retrieving HTML content from {url}", style="black on yellow", border_style="yellow"))
+                content, links = await async_scrape(
+                    [url],
+                    ignored_websites="",
+                    scrapped_pages_no=1,
+                    page_content_words_limit=tool_specific_valves["PAGE_CONTENT_WORDS_LIMIT"],
+                    debug=True
+                )
+                content = content[0] if content else ""
+                console.print(Panel(f"Successfully retrieved HTML content from {url}", style="black on green", border_style="green"))
+            except Exception as e:
+                error_msg = f"Error while scraping HTML: {str(e)}"
+                console.print(Panel(error_msg, style="white on red", border_style="red"))
+                return {
+                    "result": f"Failed to retrieve content from {url}: {str(e)}",
+                    "citations": []
+                }
+
+        # For PDF documents
+        elif doc_type.lower() == "pdf":
+            try:
+                console.print(Panel(f"Retrieving PDF content from {url}", style="black on yellow", border_style="yellow"))
+                loader = PyPDFLoader(url)
+                documents = loader.load_and_split()
+                
+                # Extract text from PDF documents
+                pdf_text = ""
+                for doc in documents:
+                    pdf_text += doc.page_content + "\n\n"
+                
+                # Assign the extracted text to content
+                content = pdf_text
+                console.print(Panel(f"Successfully retrieved PDF content from {url}", style="black on green", border_style="green"))
+            except Exception as e:
+                error_msg = f"Error while scraping PDF: {str(e)}"
+                console.print(Panel(error_msg, style="white on red", border_style="red"))
+                return {
+                    "result": f"Failed to retrieve PDF content from {url}: {str(e)}",
+                    "citations": []
+                }
+        else:
+            return {
+                "result": f"Unsupported document type: {doc_type}. Supported types are 'html' and 'pdf'.",
+                "citations": []
+            }
+
+        # Create citation for this website
+        citation = {
+            "data": {
+                "source": {
+                    "name": title if title else f"Web content from {url}",
+                    "type": "Web"  # Add source type to identify it's from the web
+                },
+                "metadata": [
+                    {
+                        "source": url
+                    }
+                ]
+            }
+        }
+        
+        return {
+            "result": format_rulac_result(research_result),
+            "citations": [citation]
+        }
+        
+    except Exception as e:
+        error_message = f"Error retrieving website content: {e}"
+        print(f"DEBUG: {error_message}")
+        console.print(Panel.fit(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error retrieving content from {url}: {error_message}",
+            "citations": []
+        }
+
+async def test_get_website():
+    """Test function for get_website tool"""
+    console.print(Panel("Testing get_website tool", style="bold white on blue", border_style="blue"))
+    
+    test_scenarios = [
+        {
+            "name": "HTML Website Retrieval",
+            "params": {
+                "url": "https://www.bbc.com/news/topics/cx1m7zg0gzdt",
+                "doc_type": "html"
+            },
+        },
+        {
+            "name": "PDF Document",
+            "params": {
+                "url": "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/irrc-873-vite.pdf",
+                "doc_type": "pdf"
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        console.print(Panel(f"[bold cyan]{scenario['name']}[/]", expand=False))
+        params = scenario["params"]
+        try:
+            console.print(f"Retrieving website content from: [bold yellow]\"{params['url']}\"[/]")
+            result = await get_website.ainvoke({
+                "url": params["url"],
+                "doc_type": params["doc_type"]
+            })
+            
+            # Display result content
+            if isinstance(result, dict) and "result" in result:
+                # Safely get a preview of the content
+                result_content = str(result["result"])
+                content_length = len(result_content)
+                preview_text = result_content[:500] + "..." if content_length > 500 else result_content
+                
+                console.print(Panel(
+                    Markdown(preview_text),
+                    title=f"[bold green]WEBSITE CONTENT PREVIEW ({content_length} characters)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                
+                # Display citation information
+                if "citations" in result and result["citations"]:
+                    console.print(f"[bold green]Found {len(result['citations'])} citations[/]")
+                    for i, citation in enumerate(result["citations"], 1):
+                        source_name = citation.get("data", {}).get("source", {}).get("name", "Unknown")
+                        source_url = citation.get("data", {}).get("metadata", [{}])[0].get("source", "No URL")
+                        console.print(f"[dim]Citation {i}: {source_name} - {source_url}[/]")
+            else:
+                console.print(Panel(
+                    Markdown(str(result)[:500] + "..." if len(str(result)) > 500 else str(result)),
+                    title="[bold green]RESULT (PREVIEW)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+        except Exception as e:
+            console.print(f"[bold red]ERROR:[/] {e}")
+            import traceback
+            traceback.print_exc()
+
+@tool
+async def getBaselineRULACinformation(
+    research_query: str,
+) -> dict:
+    """
+    Returns general information about the Rule of Law in Armed Conflicts (RULAC) project.
+    This information is retrieved from a markdown file containing essential knowledge about RULAC.
+
+    Use this tool when the user asks for general information about RULAC.
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :return: A dictionary with "result" string containing the baseline RULAC information and "citations" list of citation objects
+    """
+    try:
+        baseline_info = baselineRULACinfo.PROMPT
+
+        # Format the output using Rich
+        panel = Panel(
+            Markdown(baseline_info),
+            style="green on white",
+            border_style="black",
+            title="[TOOL INFO] RULAC BASELINE INFORMATION",
+            title_align="left",
+            expand=True,
+        )
+        console.print(panel)
+        
+        # Create citation for the baseline information
+        citation_url = "https://www.rulac.org/about"
+        source_name = "RULAC - Rule of Law in Armed Conflicts Project"
+        
+        # Create a basic citation object
+        citation = {
+            "data": {
+                "source": {
+                    "name": source_name,
+                    "type": "RULAC"
+                },
+                "metadata": [
+                    {
+                        "source": citation_url
+                    }
+                ]
+            }
+        }
+        
+        return {
+            "result": baseline_info,
+            "citations": [citation]
+        }
+    except Exception as e:
+        error_message = f"Error reading baseline RULAC information: {e}"
+        print(f"DEBUG: {error_message}")
+        console.print(Panel.fit(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error retrieving baseline information: {error_message}",
+            "citations": []
+        }
+
+async def test_baseline_information():
+    """Test the getBaselineRULACinformation tool functionality."""
+    console.print(Panel("Testing getBaselineRULACinformation tool", expand=False))
+    
+    test_scenarios = [
+        {
+            "name": "Basic Information Request",
+            "params": {
+                "research_query": "What is RULAC?",
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        console.print(Panel(f"[bold cyan]{scenario['name']}[/]", expand=False))
+        params = scenario["params"]
+        try:
+            console.print(f"Querying: [bold yellow]\"{params['research_query']}\"[/]")
+            result = await getBaselineRULACinformation.ainvoke(
+                {"research_query": params["research_query"]}
+            )
+            
+            # Display result content
+            if isinstance(result, dict) and "result" in result:
+                preview_text = result["result"][:500] + "..." if len(result["result"]) > 500 else result["result"]
+                console.print(Panel(
+                    Markdown(preview_text),
+                    title=f"[bold green]RESULT PREVIEW ({len(result['result'])} characters)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                
+                # Display citation information
+                if "citations" in result and result["citations"]:
+                    console.print(f"[bold green]Found {len(result['citations'])} citations[/]")
+                    for i, citation in enumerate(result["citations"], 1):
+                        source_name = citation.get("data", {}).get("source", {}).get("name", "Unknown")
+                        source_url = citation.get("data", {}).get("metadata", [{}])[0].get("source", "No URL")
+                        console.print(f"[dim]Citation {i}: {source_name} - {source_url}[/]")
+            else:
+                console.print(Panel(
+                    Markdown(str(result)[:500] + "..." if len(str(result)) > 500 else str(result)),
+                    title="[bold green]RESULT (PREVIEW)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+        except Exception as e:
+            console.print(f"[bold red]ERROR:[/] {e}")
+            import traceback
+            traceback.print_exc()
+
+async def get_search_results(query, engine_api_base_url, number_of_results=10):
+    """
+    Get search results from a search engine.
+    
+    Args:
+        query: The search query
+        engine_api_base_url: Base URL for the search engine API
+        number_of_results: Number of results to retrieve
+        
+    Returns:
+        List of search result dictionaries
+    """
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    
+    try:
+        # Set up search parameters
+        params = {
+            "q": query,
+            "format": "json",
+            "number_of_results": number_of_results,
+        }
+        
+        # Send request to search engine
+        console.print(Panel(f"Connecting to search engine at {engine_api_base_url}", style="black on yellow", border_style="yellow"))
+        resp = requests.get(
+            engine_api_base_url, params=params, headers=HEADERS, timeout=120
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        
+        # Extract results
+        results = data.get("results", [])
+        console.print(Panel(f"Found {len(results)} search results", style="black on green", border_style="green"))
+        return results
+        
+    except requests.exceptions.RequestException as e:
+        error_message = f"Search engine error: {str(e)}"
+        console.print(Panel(error_message, style="white on red", border_style="red"))
+        return []
+
+@tool
+async def brave_search(
+    query: str
+) -> dict:
+    """
+    Search the web for any type of information.
+    Uses a web search engine to find relevant pages, and returns their content.
+
+    Use this tool when the user asks for any unknown information, news, info, public contact info, weather, etc.
+     Use this tool when you need up-to-date information that may not be in the RULAC database,
+    such as recent developments in conflicts, new humanitarian situations, or general information
+    about current events related to international law and armed conflicts.
+    
+    
+    :param query: The search query to look for on the web
+    :return: A dictionary with "result" string containing search results and "citations" list of citation objects
+    """
+    try:
+        # Display status messages using console
+        console.print(Panel(f"🔍 Searching web for: {query}", style="black on yellow", border_style="yellow"))
+        
+        if os.path.exists("/app/backend/beacon_code"):
+            engine_api_base_url = tool_specific_valves["SEARXNG_ENGINE_API_BASE_URL"]
+        else:
+            engine_api_base_url = tool_specific_valves["SEARXNG_ENGINE_API_TESTING_BASE_URL"]
+
+        # Get search results from SearXNG
+        search_results = await get_search_results(
+            query=query,
+            engine_api_base_url=engine_api_base_url
+        )
+        
+        # Process search results
+        results_list = []
+        formatted_results = []
+        citations = []
+        
+        if search_results:
+            console.print(Panel(f"Processing {len(search_results)} search results", style="black on yellow", border_style="yellow"))
+            
+            # Filter out ignored websites
+            ignored_websites_list = tool_specific_valves["IGNORED_WEBSITES"].split(",") if tool_specific_valves["IGNORED_WEBSITES"] else []
+            filtered_results = [
+                r for r in search_results
+                if not any(ignored in r["url"] for ignored in ignored_websites_list)
+            ]
+            
+            # Limit number of pages to scrape
+            filtered_results = filtered_results[:tool_specific_valves["SCRAPPED_PAGES_NO"]]
+            
+            # Use async_scraper to get content of each page
+            urls = [r["url"] for r in filtered_results]
+            
+            try:
+                console.print(Panel(f"Scraping content from {len(urls)} pages", style="black on yellow", border_style="yellow"))
+                pages_content, all_links = await async_scrape(
+                    urls,
+                    ignored_websites=tool_specific_valves["IGNORED_WEBSITES"],
+                    scrapped_pages_no=tool_specific_valves["SCRAPPED_PAGES_NO"],
+                    page_content_words_limit=tool_specific_valves["PAGE_CONTENT_WORDS_LIMIT"],
+                    debug=True
+                )
+                
+                # Process and format results
+                for i, (url, title, content) in enumerate(zip(urls, [r["title"] for r in filtered_results], pages_content)):
+                    if not content:
+                        continue
+                    
+                    # Add to results list
+                    results_list.append({
+                        "url": url,
+                        "title": title,
+                        "content": content
+                    })
+                    
+                    # Format for output
+                    formatted_results.append(
+                        f"## {i+1}. {title}\n"
+                        f"URL: {url}\n\n"
+                        f"{content}"
+                    )
+                    
+                    # Create citation
+                    if tool_specific_valves["CITATION_LINKS"]:
+                        citation = {
+                            "data": {
+                                "source": {
+                                    "name": title if title else f"Web content from {url}"
+                                },
+                                "metadata": [
+                                    {
+                                        "source": url
+                                    }
+                                ]
+                            }
+                        }
+                        citations.append(citation)
+                
+                # Limit number of returned pages
+                results_list = results_list[:tool_specific_valves["RETURNED_SCRAPPED_PAGES_NO"]]
+                formatted_results = formatted_results[:tool_specific_valves["RETURNED_SCRAPPED_PAGES_NO"]]
+                citations = citations[:tool_specific_valves["RETURNED_SCRAPPED_PAGES_NO"]]
+                
+            except Exception as e:
+                error_msg = f"Error during page scraping: {str(e)}"
+                console.print(Panel(error_msg, style="white on red", border_style="red"))
+        else:
+            console.print(Panel("No search results found", style="white on red", border_style="red"))
+        
+        console.print(Panel(f"Search complete. Found {len(results_list)} relevant pages", style="black on green", border_style="green"))
+        
+        # Return final results
+        if not formatted_results:
+            return {
+                "result": "No relevant information found for your query.",
+                "citations": []
+            }
+        
+        return {
+            "result": f"# Web Search Results for: {query}\n\n" + "\n---\n".join(formatted_results),
+            "citations": citations
+        }
+    
+    except Exception as e:
+        error_message = f"Error during web search: {str(e)}"
+        console.print(Panel(error_message, style="white on red", border_style="red"))
+        return {
+            "result": f"Error searching the web: {error_message}",
+            "citations": []
+        }
+
+async def test_brave_search():
+    """Test function for brave_search tool"""
+    console.print(Panel("Testing brave_search tool", style="bold white on blue", border_style="blue"))
+    
+    test_scenarios = [
+        {
+            "name": "Recent web Search",
+            "params": {
+                "query": "who is RULAC and how do they classify conflicts?",
+            },
+
+        },
+        {
+            "name": "Current Conflict Query",
+            "params": {
+                "query": "latest information on Ukraine conflict classification",
+            },
+        }
+    ]
+
+    for scenario in test_scenarios:
+        console.print(Panel(f"[bold cyan]{scenario['name']}[/]", expand=False))
+        params = scenario["params"]
+        try:
+            console.print(f"Running search for query: [bold yellow]\"{params['query']}\"[/]")
+            result = await brave_search.ainvoke({
+                "query": params["query"]
+            })
+            
+            # Display result content
+            if isinstance(result, dict) and "result" in result:
+                preview_text = result["result"][:500] + "..." if len(result["result"]) > 500 else result["result"]
+                console.print(Panel(
+                    Markdown(preview_text),
+                    title=f"[bold green]SEARCH RESULTS PREVIEW ({len(result['result'])} characters)[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                
+                # Display citation information
+                if "citations" in result and result["citations"]:
+                    console.print(f"[bold green]Found {len(result['citations'])} citations[/]")
+                    for i, citation in enumerate(result["citations"], 1):
+                        source_name = citation.get("data", {}).get("source", {}).get("name", "Unknown")
+                        source_url = citation.get("data", {}).get("metadata", [{}])[0].get("source", "No URL")
+                        console.print(f"[dim]Citation {i}: {source_name} - {source_url}[/]")
+            else:
+                preview_text = str(result)[:500] + "..." if len(str(result)) > 500 else str(result)
+                console.print(Panel(
+                    Markdown(preview_text),
+                    title="[bold green]SEARCH RESULTS PREVIEW[/]",
+                    border_style="green",
+                    expand=True
+                ))
+                console.print(f"[dim]FULL RESULT LENGTH: {len(str(result))} characters[/]")
+            
+            # Add a separator between scenarios
+            console.print("\n" + "="*50 + "\n")
+        except Exception as e:
+            console.print(f"[bold red]ERROR:[/] {e}")
+            import traceback
+            traceback.print_exc()
+
+def emit_status(message, status_type="info"):
+    """
+    Emit a status message using console.print.
+    
+    Args:
+        message: The status message to emit
+        status_type: The type of status message (info, error, etc.)
+    """
+    if status_type == "error":
+        console.print(Panel(message, style="white on red", border_style="red"))
+    elif status_type == "success":
+        console.print(Panel(message, style="black on green", border_style="green"))
+    else:
+        console.print(Panel(message, style="black on yellow", border_style="yellow"))
+
+async def async_scrape(
+    urls: List[str],
+    ignored_websites: str = "",
+    scrapped_pages_no: int = 5,
+    page_content_words_limit: int = 2000,
+    debug: bool = False
+) -> tuple:
+    """
+    Asynchronously scrape multiple URLs using requests instead of AsyncChromiumLoader.
+    
+    Args:
+        urls: List of URLs to scrape
+        ignored_websites: Comma-separated list of websites to ignore
+        scrapped_pages_no: Maximum number of pages to scrape
+        page_content_words_limit: Maximum number of words per page
+        debug: Whether to print debug information
+        
+    Returns:
+        Tuple containing (list of page contents, list of all links)
+    """
+    
+    # Limit the number of URLs to scrape
+    urls = urls[:scrapped_pages_no]
+    
+    # Initialize results
+    pages_content = []
+    all_links = []
+    
+    # Parse ignored websites
+    ignored_websites_list = ignored_websites.split(",") if ignored_websites else []
+    
+    # User agent for requests
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    
+    # Process each URL
+    for url in urls:
+        try:
+            # Check if URL should be ignored
+            base_url = get_base_url(url)
+            if any(ignored in base_url for ignored in ignored_websites_list):
+                if debug:
+                    console.print(f"Skipping ignored website: {url}")
+                pages_content.append("")
+                continue
+                
+            # Use requests to fetch the content
+            if debug:
+                console.print(f"Scraping URL: {url}")
+                
+            # Fetch the page content with requests
+            response = requests.get(url, headers=headers, timeout=120)
+            response.raise_for_status()
+            
+            # Parse the HTML with BeautifulSoup
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Extract links
+            links = []
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                # Convert relative URLs to absolute
+                if href.startswith('/'):
+                    href = urljoin(url, href)
+                links.append(href)
+            all_links.extend(links)
+            
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+                
+            # Remove all link references like [1], [2], etc.
+            for sup in soup.find_all(['sup']):
+                sup.decompose()
+            
+            # Get the text content
+            text = soup.get_text(separator=" ", strip=True)
+            
+            # Clean up the text
+            # Remove wiki-style links like (/wiki/something)
+            text = re.sub(r'\(/wiki/[^)]+\)', '', text)
+            # Remove URLs in parentheses like (https://...)
+            text = re.sub(r'\(https?://[^)]+\)', '', text)
+            # Remove citation references like [ 1 (#cite_note-something-1) ]
+            text = re.sub(r'\[\s*\d+\s*\(#cite[^]]+\)\s*\]', '', text)
+            # Remove any remaining URLs
+            text = re.sub(r'https?://\S+', '', text)
+            # Clean up multiple spaces
+            text = re.sub(r'\s+', ' ', text).strip()
+            
+            # Limit to specified number of words
+            if page_content_words_limit > 0:
+                words = text.split()
+                if len(words) > page_content_words_limit:
+                    text = " ".join(words[:page_content_words_limit])
+                    if debug:
+                        console.print(f"Truncated content to {page_content_words_limit} words")
+            
+            # Add the content to the results
+            pages_content.append(text)
+            
+            if debug:
+                console.print(f"Successfully scraped: {url}")
+                
+        except Exception as e:
+            if debug:
+                console.print(f"Error scraping {url}: {str(e)}")
+            # Add empty content for failed scrapes
+            pages_content.append("")
+    
+    return pages_content, all_links
+
+if __name__ == "__main__":
+    import asyncio
+    
+    async def run_tests():
+        """Run all test functions"""
+        console.print(Panel("[bold]STARTING RULAC TOOLS TESTS[/]", style="bold white on blue", border_style="blue"))
+        
+        # Run test functions
+        # Uncomment below to run additional tests
+      
+        # await test_baseline_information()
+        # await test_classification_methodology()
+        # await test_ihl_legal_framework()
+        # await test_by_state_actor_involvement()
+        # await test_by_non_state_actor_involvement()
+        # await test_by_organizational_involvement()
+        # await test_by_conflict_taking_place_in_country()
+        # await test_by_region()
+        await test_brave_search()
+        # await test_get_website()
+
+        console.print(Panel("[bold]ALL TESTS COMPLETED[/]", style="bold white on green", border_style="green"))
+    
+    # Run the async test function
+    asyncio.run(run_tests())

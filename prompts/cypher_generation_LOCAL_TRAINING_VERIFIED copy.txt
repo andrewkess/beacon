@@ -1,0 +1,230 @@
+Generate a Cypher query based on a research question to retrieve conflict-related data, including relevant countries, state actors, non-state actors, geographical regions, and conflict classifications.
+Important Requirements for Cypher Queries
+
+    Primary Goal: Ensure the query retrieves relevant conflict data.
+    Return Structure:
+        Always return a structured object named RULAC_research.
+        Inside this object, include:
+        
+        
+        1. summary 
+
+    A human-readable summary of the findings, formatted as a sentence or paragraph.
+    If no conflicts are found, the summary should state that explicitly.
+    If conflicts are found, the summary should describe the number of conflicts, their types, and any key insights.
+        
+        
+ 2.  a list conflict_details containing:
+            Conflict name, classification, overview, applicable IHL laws, involved parties, and citation.
+    Strict Schema Adherence:
+        Use only the provided schema's node labels, relationships, and properties.
+        Do not invent new properties or relationships.
+
+# Instructions:
+1. Identify any actors, regions, or conflict types mentioned in the question.
+2. Use **only** the relationship types and properties provided in the schema. Do not use anything else that is not in the schema.
+3. Ensure the query retrieves all conflicts, state actors, non-state actors, classifications, and other properties as shown in the examples.
+4. Avoid directly matching conflicts by name (e.g., MATCH (c:Conflict {{name: "Syrian Civil War"}})). Instead, match conflicts using the UN M49 code of the relevant country or state actor. This is because the conflict names may vary.
+4b. In the same way, never match a NonStateActor directly by the name, but rather by name and alias, and always including lowercase comparisons for flexible retreival. eg. 
+"WHERE toLower(actor.name) CONTAINS toLower(actor_name)
+   OR any(alias IN actor.aliases WHERE toLower(alias) CONTAINS toLower(actor_name))" 
+6. Ignore dates in the query, as all conflicts are considered actively present and generally relevent to the question.
+7. Use the `conflict_details` array to store the details of each conflict.
+
+
+11. Use the hierarchical UN M49 codes to handle geographical countries and regions correctly. (See the detailed codes below.)
+
+Hierarchical UN M49 Regional Grouping:
+World (001)
+  ├── Africa (002)
+  │   ├── Northern Africa (015)
+  │   ├── Sub-Saharan Africa (202)
+  │   │   ├── Eastern Africa (014)
+  │   │   ├── Middle Africa (017)
+  │   │   ├── Southern Africa (018)
+  │   │   └── Western Africa (011)
+  ├── Americas (019)
+  │   ├── North America (003)
+  │   │   ├── Northern America (021)
+  │   │   ├── Caribbean (029)
+  │   │   └── Central America (013)
+  │   └── Latin America and the Caribbean (419)
+  │       ├── Caribbean (029)
+  │       ├── Central America (013)
+  │       └── South America (005)
+  ├── Antarctica (010)
+  ├── Asia (142)
+  │   ├── Central Asia (143)
+  │   ├── Eastern Asia (030)
+  │   ├── South-Eastern Asia (035)
+  │   ├── Southern Asia (034)
+  │   └── Western Asia (145)
+  ├── Europe (150)
+  │   ├── Eastern Europe (151)
+  │   ├── Northern Europe (154)
+  │   ├── Southern Europe (039)
+  │   └── Western Europe (155)
+  └── Oceania (009)
+      └── Small Island Developing States (SIDS) (722)
+
+729 for modern Sudan after the separation of South Sudan in 2011
+
+Use the hierarchical UN M49 regional groupings to determine whether to match conflicts to a specific region (e.g., Central America (013)) or if it should be summed up for a broader region. Do not associate the same conflict to both a parent region and its subregion at the same time.
+
+BRICS Countries and their UN M49 Codes:
+    Brazil: 076
+    Russia: 643
+    India: 356
+    China: 156
+    South Africa: 710
+    Egypt: 818
+    Ethiopia: 231
+    Indonesia: 360
+    Iran: 364
+    United Arab Emirates (UAE): 784
+
+   
+Political groupings:
+// Define the list of UN M49 Codes for European Union member states
+WITH [
+    "040", "056", "100", "191", "196", "203", "208", "233", 
+    "246", "250", "276", "300", "348", "372", "380", "428", 
+    "440", "442", "470", "528", "616", "620", "642", "703", 
+    "705", "724", "752"
+] AS european_union_member_codes
+
+
+// Define the list of UN M49 Codes for African Union member states
+WITH [
+    "108", "120", "140", "148", "178", "180", "226", "266", "678",  // Central Africa
+    "174", "262", "232", "231", "404", "450", "480", "646", "690", "706", "728", "729", "834", "800",  // Eastern Africa
+    "012", "818", "434", "478", "504", "732", "788",  // Northern Africa
+    "024", "072", "748", "426", "454", "508", "516", "710", "894", "716",  // Southern Africa
+    "204", "854", "132", "384", "270", "288", "324", "624", "430", "466", "562", "566", "686", "694", "768"  // Western Africa
+] AS african_union_member_codes
+
+// Define the list of UN M49 Codes for G7 and BRICS countries
+WITH [
+    "124", "250", "276", "380", "392", "826", "840"  // G7 countries: Canada (124), France (250), Germany (276), Italy (380), Japan (392), United Kingdom (826), USA (840)
+] AS g7_codes,
+[
+    "076", "643", "356", "156", "710", "818", "231", "360", "364", "784"  // BRICS countries: Brazil (076), Russia (643), India (356), China (156), South Africa (710), Egypt (818), Ethiopia (231), Indonesia (360), Iran (364), United Arab Emirates (784)
+] AS brics_codes
+
+// Define the list of UN M49 Codes for NATO countries
+WITH [
+    "008",  // Albania
+    "056",  // Belgium
+    "100",  // Bulgaria
+    "124",  // Canada
+    "191",  // Croatia
+    "203",  // Czech Republic
+    "208",  // Denmark
+    "233",  // Estonia
+    "246",  // Finland
+    "250",  // France
+    "276",  // Germany
+    "300",  // Greece
+    "348",  // Hungary
+    "352",  // Iceland
+    "380",  // Italy
+    "428",  // Latvia
+    "440",  // Lithuania
+    "442",  // Luxembourg
+    "499",  // Montenegro
+    "528",  // Netherlands
+    "807",  // North Macedonia
+    "578",  // Norway
+    "616",  // Poland
+    "620",  // Portugal
+    "642",  // Romania
+    "703",  // Slovakia
+    "705",  // Slovenia
+    "724",  // Spain
+    "752",  // Sweden
+    "792",  // Turkey
+    "826",  // United Kingdom
+    "840"   // United States
+] AS nato_codes
+
+// Define the list of UN M49 Codes for ASEAN countries
+WITH [
+    "096",  // Brunei
+    "116",  // Cambodia
+    "360",  // Indonesia
+    "418",  // Laos
+    "458",  // Malaysia
+    "104",  // Myanmar
+    "608",  // Philippines
+    "702",  // Singapore
+    "764",  // Thailand
+    "704"   // Vietnam
+] AS asean_codes
+
+
+# Schema
+{schema}
+
+
+# Examples
+
+
+
+
+
+
+
+## Example 4 (reworded) -Retreive (all) conflict data taking place in a country as in geographically occuring within its borders  AND filtered by  conflict type
+Research Question: Are there ongoing military occupations in happening in Afghanistan?
+Generated Query:
+// Retrieve military occupations taking place in Afghanistan
+
+OPTIONAL MATCH (c:Conflict)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType {{type: "Military Occupation"}})
+OPTIONAL MATCH (c)-[:IS_TAKING_PLACE_IN_COUNTRY]->(sa:StateActor {{UN_M49Code: "004"}}) // Afghanistan
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor) 
+
+WITH sa.name AS country_name, 
+     COALESCE(COUNT(DISTINCT c), 0) AS total_conflicts, 
+     COALESCE(COLLECT(DISTINCT c.name), []) AS conflict_names, 
+     COALESCE(COLLECT(DISTINCT {{ 
+         conflict_name: COALESCE(c.name, "Unknown"), 
+         conflict_classification: COALESCE(ct.type, "Unclassified"), 
+         conflict_overview: COALESCE(c.overview, "No Overview Available"), 
+         applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"), 
+         conflict_citation: COALESCE(c.citation, "No Citation Available"), 
+         state_parties: CASE 
+             WHEN c IS NULL OR size([p IN COLLECT(DISTINCT actor) WHERE "StateActor" IN labels(p)]) = 0 
+             THEN "No state actors recorded" 
+             ELSE apoc.text.join([p IN COLLECT(DISTINCT actor) WHERE "StateActor" IN labels(p) | p.name], ", ") 
+         END, 
+         non_state_parties: CASE 
+             WHEN c IS NULL OR size([p IN COLLECT(DISTINCT actor) WHERE "NonStateActor" IN labels(p)]) = 0 
+             THEN "No non-state actors recorded" 
+             ELSE apoc.text.join([p IN COLLECT(DISTINCT actor) WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+         END 
+     }}), []) AS conflict_details 
+
+// Ensure at least one row is always returned
+WITH country_name, 
+     total_conflicts, 
+     CASE WHEN total_conflicts = 0 THEN [] ELSE conflict_details END AS final_conflict_details, 
+     CASE 
+         WHEN total_conflicts = 0 THEN 
+             "According to RULAC, there are currently no recorded military occupations taking place in " + country_name + "." 
+         ELSE 
+             "According to RULAC, there are currently " + toString(total_conflicts) + 
+             " military occupation(s) taking place in " + country_name + ". Conflicts: " + 
+             apoc.text.join(conflict_names, ", ") 
+     END AS summary_text 
+
+RETURN {{ 
+    summary: COALESCE(summary_text, "According to RULAC, there are currently no recorded military occupations taking place in " + country_name + "."), 
+    conflict_details: final_conflict_details 
+}} AS RULAC_research
+
+
+
+# Here is your research question:
+{question}
+
+Remember, your task is to return a cypher query. Do not add line breaks or new lines like /n Only provide the cypher query and nothing else. Do not start with the word "cypher"

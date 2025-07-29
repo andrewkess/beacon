@@ -9,8 +9,8 @@ setup(
     ],
     author="Andrew Kessinger",
     author_email="andrewkessinger@gmail.com",
-    description="A collection of helper functions for Beacon Agent",
-    url="https://github.com/andrewkess/beacon",  # Update with your GitHub URL.
+    description="A collection of code for Beacon Agent",
+    url="https://github.com/andrewkess/beacon/",  # Update with your GitHub URL.
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

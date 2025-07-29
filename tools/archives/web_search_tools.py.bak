@@ -1,0 +1,542 @@
+"""
+Web Search Tools for BeaconFunctionOpenWEBUI
+
+This module provides web search capabilities through SearXNG and website scraping
+functionality to enhance research capabilities.
+"""
+import os
+import requests
+from datetime import datetime
+import json
+from requests import get
+from bs4 import BeautifulSoup
+import concurrent.futures
+from html.parser import HTMLParser
+from urllib.parse import urlparse, urljoin
+import re
+import unicodedata
+from typing import Callable, Any, List, Dict, Union
+from langchain_core.tools import tool
+import logging
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+from rich.logging import RichHandler
+from rich import print as rprint
+from langchain_community.document_loaders import AsyncChromiumLoader
+from langchain_community.document_transformers import BeautifulSoupTransformer
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.messages import AIMessage
+from fake_useragent import UserAgent
+import asyncio
+
+# Set up fake user agent
+ua = UserAgent()
+os.environ["USER_AGENT"] = ua.random
+
+# Configure logging
+logger = logging.getLogger("WebSearchTools")
+
+# Create Rich console for prettier output
+console = Console()
+
+class HelpFunctions:
+    def __init__(self):
+        pass
+
+    def get_base_url(self, url):
+        parsed_url = urlparse(url)
+        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        return base_url
+
+    def generate_excerpt(self, content, max_length=200):
+        """
+        Generate a clean excerpt from content, truncating properly at word boundaries 
+        and removing excess whitespace.
+        """
+        if not content:
+            return ""
+            
+        # Clean up the content
+        clean_content = re.sub(r'\s+', ' ', content).strip()
+        
+        # Return full content instead of truncated excerpt
+        return clean_content
+
+
+    def remove_emojis(self, text):
+        return "".join(c for c in text if not unicodedata.category(c).startswith("So"))
+
+
+    def truncate_to_n_words(self, text, token_limit):
+        tokens = text.split()
+        truncated_tokens = tokens[:token_limit]
+        return " ".join(truncated_tokens)
+
+
+class EventEmitter:
+    def __init__(self, event_emitter: Callable[[dict], Any] = None):
+        self.event_emitter = event_emitter
+
+    async def emit(self, description="Unknown State", status="in_progress", done=False):
+        """
+        Emit an event with status information.
+        
+        Args:
+            description: Human-readable description of the current state
+            status: Status code (in_progress, complete, error)
+            done: Whether this is the final status update
+        """
+        # Always log the status message for debugging
+        logger.debug(f"Status: {status} - {description} (done: {done})")
+        
+        if self.event_emitter:
+            try:
+                event_data = {
+                    "type": "status",
+                    "data": {
+                        "status": status,
+                        "description": description,
+                        "done": done,
+                    },
+                }
+                await self.event_emitter(event_data)
+                # If logging level is debug, print the event info directly
+                if logger.level <= logging.DEBUG:
+                    # Format the emit message with rich coloring
+                    style = "blue" if status == "in_progress" else "green" if status == "complete" else "red"
+                    console.print(f"[bold {style}]Emitted:[/] {description}")
+            except Exception as e:
+                logger.error(f"Error emitting event: {e}")
+                # Print the error to make debugging easier
+                console.print(f"[bold red]Event emitter error:[/] {e}")
+                # Continue with the main function even if event emitter fails
+
+
+# Default configuration values
+DEFAULT_VALVES = {
+    "SEARXNG_ENGINE_API_BASE_URL": "http://localhost:8081/search",
+    "IGNORED_WEBSITES": "",
+    "RETURNED_SCRAPPED_PAGES_NO": 3,
+    "SCRAPPED_PAGES_NO": 5,
+    "PAGE_CONTENT_WORDS_LIMIT": 2000,
+    "CITATION_LINKS": True,
+}
+
+# Headers for requests
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+}
+
+
+async def async_scraper(url: str, doc_type: str, max_chars: int = None) -> dict:
+    """
+    Asynchronously scrape content from a URL based on document type.
+    
+    Args:
+        url: The URL to scrape
+        doc_type: The type of document ('html' or 'pdf')
+        max_chars: Maximum number of characters to return (optional, defaults to full content)
+        
+    Returns:
+        Dictionary with source URL and content
+    """
+    if doc_type == "html":
+        try:
+            # Create AsyncChromiumLoader
+            loader = AsyncChromiumLoader([url])
+            # Load documents asynchronously
+            docs = await loader.aload()
+            
+            if not docs or len(docs) == 0:
+                logger.error(f"No content loaded from {url}")
+                return {"source": url, "content": AIMessage(content=f"Error: No content loaded from {url}")}
+            
+            # Transform documents with BeautifulSoupTransformer
+            bs_transformer = BeautifulSoupTransformer()
+            docs_transformed = bs_transformer.transform_documents(
+                docs, tags_to_extract=["p", "h1", "h2", "h3", "h4", "h5", "h6"]
+            )
+            
+            # Combine content from all documents if there are multiple
+            combined_content = ""
+            for doc in docs_transformed:
+                # Use BeautifulSoup to extract only the text, removing links
+                soup = BeautifulSoup(doc.page_content, "html.parser")
+                
+                # Remove all link references like [1], [2], etc.
+                for sup in soup.find_all(['sup']):
+                    sup.decompose()
+                
+                # Remove URL references in parentheses and wiki-style links
+                plain_text = soup.get_text(separator=" ", strip=True)
+                # Remove wiki-style links like (/wiki/something)
+                plain_text = re.sub(r'\(/wiki/[^)]+\)', '', plain_text)
+                # Remove URLs in parentheses like (https://...)
+                plain_text = re.sub(r'\(https?://[^)]+\)', '', plain_text)
+                # Remove citation references like [ 1 (#cite_note-something-1) ]
+                plain_text = re.sub(r'\[\s*\d+\s*\(#cite[^]]+\)\s*\]', '', plain_text)
+                # Remove any remaining URLs
+                plain_text = re.sub(r'https?://\S+', '', plain_text)
+                # Clean up multiple spaces
+                plain_text = re.sub(r'\s+', ' ', plain_text).strip()
+                
+                combined_content += plain_text + "\n\n"
+            
+            # Limit content to max_chars if specified
+            if max_chars is not None and len(combined_content) > max_chars:
+                combined_content = combined_content[:max_chars]
+                logger.debug(f"Content truncated to {max_chars} characters")
+            
+            logger.debug(f"Successfully scraped HTML from {url}")
+            return {"source": url, "content": AIMessage(content=combined_content)}
+        except Exception as e:
+            logger.error(f"Error scraping website: {str(e)}")
+            return {"source": url, "content": AIMessage(content=f"Error scraping website: {str(e)}")}
+    elif doc_type == "pdf":
+        try:
+            # For PDF files, use PyPDFLoader (non-async)
+            loader = PyPDFLoader(url)
+            pages = loader.load_and_split()
+            
+            # Extract text directly from pages
+            text_content = ""
+            for page in pages:
+                text_content += page.page_content + "\n\n"
+            
+            # Limit content to max_chars if specified
+            if max_chars is not None and len(text_content) > max_chars:
+                text_content = text_content[:max_chars]
+                logger.debug(f"PDF content truncated to {max_chars} characters")
+            
+            logger.debug(f"Successfully loaded PDF from {url}")
+            return {"source": url, "content": AIMessage(content=text_content)}
+        except Exception as e:
+            logger.error(f"Error scraping PDF: {str(e)}")
+            return {"source": url, "content": AIMessage(content=f"Error scraping PDF: {str(e)}")}
+    else:
+        return {"source": url, "content": AIMessage(content="Unsupported document type, supported types are 'html' and 'pdf'.")}
+
+
+@tool
+async def web_search(
+    query: str, 
+    pipeSelf=None,
+    event_emitter=None,
+) -> str:
+    """
+    Search the web and get the content of the relevant pages. Search for unknown knowledge, news, info, public contact info, weather, etc.
+    
+    Args:
+        query: Web Query used in search engine.
+        pipeSelf: Reference to the Pipe instance (optional).
+        event_emitter: Function to emit events (optional).
+        
+    Returns:
+        The content of the pages in string format.
+    """
+
+
+    functions = HelpFunctions()
+    emitter = EventEmitter(event_emitter)
+    
+    # Configure valves
+    valves = DEFAULT_VALVES.copy()
+    if pipeSelf and hasattr(pipeSelf, 'valves'):
+        # Update with any custom values from Pipe.valves if they exist
+        if hasattr(pipeSelf.valves, 'searxng_url'):
+            valves["SEARXNG_ENGINE_API_BASE_URL"] = pipeSelf.valves.searxng_url
+        if hasattr(pipeSelf.valves, 'ignored_websites'):
+            valves["IGNORED_WEBSITES"] = pipeSelf.valves.ignored_websites
+
+    await emitter.emit(f"🔍 Searching web for: {query}")
+
+    search_engine_url = valves["SEARXNG_ENGINE_API_BASE_URL"]
+
+    # Ensure RETURNED_SCRAPPED_PAGES_NO does not exceed SCRAPPED_PAGES_NO
+    if valves["RETURNED_SCRAPPED_PAGES_NO"] > valves["SCRAPPED_PAGES_NO"]:
+        valves["RETURNED_SCRAPPED_PAGES_NO"] = valves["SCRAPPED_PAGES_NO"]
+
+    params = {
+        "q": query,
+        "format": "json",
+        "number_of_results": valves["RETURNED_SCRAPPED_PAGES_NO"],
+    }
+
+    try:
+        await emitter.emit("📡 Connecting to search engine")
+        resp = requests.get(
+            search_engine_url, params=params, headers=HEADERS, timeout=120
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        results = data.get("results", [])
+        limited_results = results[: valves["SCRAPPED_PAGES_NO"]]
+        await emitter.emit(f"📚 Found {len(limited_results)} search results")
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Search engine error: {str(e)}")
+        await emitter.emit(
+            status="error",
+            description=f"❌ Search error: {str(e)}",
+            done=True,
+        )
+        return f"Error during search: {str(e)}"
+
+    results_list = []
+    formatted_results = []
+    
+    if limited_results:
+        await emitter.emit(f"📝 Processing search results using AsyncChromiumLoader")
+        
+        # Process results using async_scraper instead of the old method
+        tasks = []
+        for result in limited_results[:valves["RETURNED_SCRAPPED_PAGES_NO"]]:
+            # Check if the website is in the ignored list
+            if valves.get("IGNORED_WEBSITES"):
+                base_url = functions.get_base_url(result["url"])
+                if any(
+                    ignored_site.strip() in base_url
+                    for ignored_site in valves.get("IGNORED_WEBSITES", "").split(",")
+                ):
+                    continue
+                    
+            # Create task for async_scraper
+            tasks.append(async_scraper(result["url"], "html", 2000))
+        
+        # Run all tasks concurrently
+        if tasks:
+            scraper_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for i, scraper_result in enumerate(scraper_results):
+                if isinstance(scraper_result, dict) and "content" in scraper_result:
+                    # Extract content from AIMessage
+                    if isinstance(scraper_result["content"], AIMessage):
+                        content = scraper_result["content"].content
+                        
+                        # Take corresponding result from limited_results
+                        original_result = None
+                        for res in limited_results:
+                            if res["url"] == scraper_result["source"]:
+                                original_result = res
+                                break
+                        
+                        if original_result:
+                            # Create result entry
+                            result_json = {
+                                "title": functions.remove_emojis(original_result["title"]),
+                                "url": original_result["url"],
+                                "content": content,
+                                "snippet": functions.remove_emojis(original_result.get("content", "")),
+                            }
+                            
+                            try:
+                                json.dumps(result_json)  # Test serialization
+                                results_list.append(result_json)
+                            except (TypeError, ValueError) as e:
+                                logger.error(f"Error serializing result: {e}")
+                                continue
+                elif isinstance(scraper_result, Exception):
+                    logger.error(f"Error in async_scraper: {str(scraper_result)}")
+        
+        # Format results for readable output
+        for result in results_list:
+            formatted_results.append(
+                f"\n## {result['title']}\n"
+                f"URL: {result['url']}\n"
+                f"Excerpt: {result['snippet']}\n"
+                f"Content: {result['content']}\n"
+            )
+
+        # Send citations if enabled
+        if valves["CITATION_LINKS"] and event_emitter:
+            for result in results_list:
+                try:
+                    await event_emitter(
+                        {
+                            "type": "citation",
+                            "data": {
+                                "document": [result["content"]],
+                                "metadata": [{"source": result["url"]}],
+                                "source": {"name": result["title"]},
+                            },
+                        }
+                    )
+                    logger.debug(f"Sent citation for: {result['url']}")
+                except Exception as e:
+                    logger.error(f"Error sending citation: {e}")
+
+    await emitter.emit(
+        status="complete",
+        description=f"✅ Found information from {len(results_list)} sources",
+        done=True,
+    )
+
+    if not formatted_results:
+        return "No relevant information found for your query."
+    
+    return f"# Web Search Results for: {query}\n\n" + "\n---\n".join(formatted_results)
+
+
+
+async def test_web_search(pipe):
+    """Test function for web_search tool"""
+    console.print(Panel.fit("Testing web_search tool", style="bold cyan"))
+    
+    test_scenarios = [
+        #  {
+        #     "name": "Recent web Search",
+        #     "params": {
+        #         "query": "who is the president of the united states?",
+        #     },
+        # },
+        {
+            "name": "Recent web Search",
+            "params": {
+                "query": "who is RULAC and how do they classify conflicts?",
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        console.print("\n")
+        console.print(Panel(f"[bold cyan]{scenario['name']}[/]", expand=False))
+        params = scenario["params"]
+        try:
+            console.print(f"Running search for query: [bold yellow]\"{params['query']}\"[/]")
+            result = await web_search.ainvoke({
+                "query": params["query"],
+                "pipeSelf": pipe,
+                "event_emitter": pipe.event_emitter,
+            })
+            
+            # Display full result instead of preview
+            console.print(Panel(
+                Text(f"{result}", style="white"),
+                title="[bold green]FULL RESULT[/]",
+                border_style="green",
+                expand=False
+            ))
+            console.print(f"[dim]FULL RESULT LENGTH: {len(result)} characters[/]")
+        except Exception as e:
+            console.print(f"[bold red]ERROR during scenario:[/] {scenario['name']} -> {str(e)}")
+            import traceback
+            console.print_exception()
+
+
+async def test_get_website(pipe):
+    """Test function for get_website tool"""
+    console.print(Panel.fit("Testing get_website tool", style="bold magenta"))
+    
+    test_scenarios = [
+        {
+            "name": "HTML Website",
+            "params": {
+                "url": "https://www.bbc.com/news/topics/cx1m7zg0gzdt",
+                "doc_type": "html"
+            },
+        },
+        {
+            "name": "PDF Document",
+            "params": {
+                "url": "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/irrc-873-vite.pdf",
+                "doc_type": "pdf"
+            },
+        },
+    ]
+
+    for scenario in test_scenarios:
+        console.print("\n")
+        console.print(Panel(f"[bold magenta]{scenario['name']}[/]", expand=False))
+        params = scenario["params"]
+        try:
+            console.print(f"Fetching content from: [bold yellow]{params['url']}[/] as {params['doc_type']}")
+            result = await get_website.ainvoke({
+                "url": params["url"],
+                "doc_type": params["doc_type"],
+                "pipeSelf": pipe,
+                "event_emitter": pipe.event_emitter,
+            })
+            
+            # Display full result without truncation
+            console.print(Panel(
+                Text(f"{result}", style="white"),
+                title="[bold green]FULL RESULT[/]",
+                border_style="green",
+                expand=False
+            ))
+            console.print(f"[dim]RESULT LENGTH: {len(result)} characters[/]")
+        except Exception as e:
+            console.print(f"[bold red]ERROR during scenario:[/] {scenario['name']} -> {str(e)}")
+            import traceback
+            console.print_exception()
+
+
+async def main():
+    # Configure logging for testing with rich handler for better formatting
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(rich_tracebacks=True, markup=True)]
+    )
+    logger.setLevel(logging.DEBUG)
+    console.print("[bold green]Logging configured at DEBUG level[/]")
+    
+    # Create a mock pipe object for testing
+    class TestPipe:
+        def __init__(self):
+            self.global_unique_RULAC_citations_retreived = set()
+            self.global_RULAC_conflict_citations_to_emit = []
+            
+            # Add values
+            self.valves = type('obj', (object,), {
+                'searxng_url': 'http://localhost:8081/search',
+                'ignored_websites': '',
+                'page_content_words_limit': 3000,
+            })
+            
+            # Add a proper event_emitter that prints to console
+            async def console_event_emitter(event_data):
+                event_type = event_data.get("type", "unknown")
+                if event_type == "status":
+                    status_data = event_data.get("data", {})
+                    status = status_data.get("status", "unknown")
+                    description = status_data.get("description", "No description")
+                    done = status_data.get("done", False)
+                    
+                    # Color-code status
+                    status_color = "yellow"
+                    if status == "complete":
+                        status_color = "green"
+                    elif status == "error":
+                        status_color = "red"
+                        
+                    console.print(
+                        Panel(
+                            f"{description}",
+                            title=f"[bold {status_color}]EVENT [{status}][/]",
+                            subtitle=f"[dim]done: {done}[/]",
+                            border_style=status_color,
+                            expand=False
+                        )
+                    )
+                elif event_type == "citation":
+                    source = event_data.get("data", {}).get("source", {}).get("name", "Unknown source")
+                    metadata = event_data.get("data", {}).get("metadata", [{}])[0]
+                    url = metadata.get("source", "No URL")
+                    console.print(f"[bold blue]CITATION:[/] Added from [italic]'{source}'[/] - [link={url}]{url}[/link]")
+                else:
+                    console.print(f"[bold purple]EVENT [{event_type}]:[/] {json.dumps(event_data)}")
+            
+            self.event_emitter = console_event_emitter
+    
+    pipe = TestPipe()
+    
+    # Run tests
+    await test_web_search(pipe)
+    # await test_get_website(pipe)
+
+if __name__ == "__main__":
+    asyncio.run(main())

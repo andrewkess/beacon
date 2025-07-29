@@ -1,0 +1,529 @@
+
+[
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What is the classification of the conflicts involving the state actor Syria?"
+    },
+
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What is the total number of conflicts involving European Union member states?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What is the total number of conflicts involving African Union member states?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts involve Egypt?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts have involved Ukraine or Saudi Arabia?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What is the classification of conflict taking place in South Africa?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What is the classification of conflict taking place in south afriaca?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "Which European Union countries have been party to the fewest conflicts?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "which countries have been party to the least conflicts?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts involve Libya?"
+    },
+
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "How many conflicts is Syria involved in? What are their names?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts involve Russia as a party?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts involve Russia or USA as a party?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts is France involved in?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "How many conflicts is Russia party to? What are their names?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What are the parties to the conflict in Ukraine?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What are the IHL provisions applicable to conflicts involving Sudan?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "How is the conflict in Ukraine classified, and what IHL applies?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts involve China as a party?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "Which conflicts involve the United Kingdom?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "How many conflicts has Ethiopia been party to?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts involve countries from Europe?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts involve state actors from West Africa?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts include state actors from North America?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many conflicts are in Mali?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts are currently taking place in Morocco?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts are taking place in Europe?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What are the conflicts in Africa? How many are there total?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "Are there any conflicts taking place in Southern Asia?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts are in Canada or Morocco?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts are taking place in the Middle East?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts involve both the USA and Russia?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts involve both Ukraine and Russia?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts involve both France and the United Kingdom?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts are taking place in BRICS countries?"
+    },
+       {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts involve both China and India?"
+    },
+
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "How many IACS in Sahel region?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "How many NIACS in Sahel region?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+         "question": "How many conflicts total in Sahel region?"
+    },
+
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts involve both Ethiopia and Eritrea?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "Are there conflicts involving both Turkey and Syria?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts involve both Saudi Arabia and Yemen?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts involve both Israel and Palestine?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "Are there conflicts involving both Germany and Poland?"
+    },
+   
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "What conflicts involve France or the United Kingdom? Which actor is involved in the most conflicts?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Are there more conflicts involving Russia or the United States as a state actor?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "How many conflicts involve the USA and its allies in NATO?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Which countries have been party to the most conflicts in the past decade?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "How do conflicts involving China compare in number to those involving Japan?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "What is the total number of conflicts involving European Union member states?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Which countries in Africa are involved in the greatest number of conflicts?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "How many conflicts involve at least three state actors?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Are there more conflicts involving Middle Eastern or Asian countries?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "How do conflicts involving G7 countries compare in number to those involving BRICS countries?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "What conflicts are classified as military occupations? How many are there total?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "What conflicts are classified as IACs? What are their names and locations?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "What conflicts are classified as NIACs? How many are there total?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "How many conflicts are classified as both IAC and military occupation?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "Which NIACs involve non-state actors in Africa?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "How many conflicts are classified as international armed conflicts in Europe?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "What conflicts in the Middle East are classified as military occupations?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "What is the classification of conflicts in Asia?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "How many IACs have occurred in the past five years?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "Are there any conflicts with ambiguous classification under IHL?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "What conflicts involve JNIM as an actor?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "What conflicts involve Boko Haram? How many total?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "What conflicts involve \"Western Education is Forbidden\" (alias for Boko Haram)?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "How many conflicts involve Al-Shabaab as an actor?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "In what conflicts is the Taliban a key non-state actor?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "What conflicts involve ISIS as a party?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "How many conflicts involve Hezbollah?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "What conflicts involve the FARC in South America?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "Are there conflicts involving the PKK?"
+    },
+ 
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What IACs involve state actors from Europe?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many IACs are taking place in Europe?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many IACs are taking place in Asia?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many NIACs are taking place in Asia?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "Where are IACs taking place in the world?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many occupations are there in the world?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many conflicts are classified as occupations and IACs?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What NIACs are occurring in Sub-Saharan Africa?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "Are there any IACs taking place in the Americas?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many NIACs involve countries from the Middle East?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "Is Syria involved in more conflicts than its neighboring countries?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts have involved Sudan since its independence?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many conflicts are happening in the Sahel region?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "Which state actors from Eastern Africa are currently involved in conflicts?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "Have Russia and China ever been involved in the same conflict?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts have both India and Pakistan been involved in?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "What are the most recent military occupations under international law?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "In which conflicts has the Wagner Group been involved?"
+    },
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts are classified as NIACs in Central Asia?"
+    }
+    ,
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "How do conflicts involving AU countries compare in number to those involving European Union countries?"
+    },
+   
+  
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "Which non-state actors are involved in the conflict in Ukraine?"
+    },
+ 
+    {
+        "category": "7. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many conflicts are classified as NIACs or IACs and involve Asia?"
+    },
+       {
+    "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+    "question": "Are there more conflicts involving China or India as state actors?"
+},
+{
+    "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+    "question": "Are there more conflicts involving Russia or the USA as state actors?"},
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Which European countries have been party to the fewest conflicts?"
+    },
+ 
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "Which conflicts has South Africa been involved in?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "Has Egypt been a party to any conflicts in the past decade?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "What conflicts has Saudi Arabia been a party to since 2000?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "Which conflicts has Turkey been involved in over the past 10 years?"
+    },
+    {
+        "category": "1. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Country/State Actor",
+        "question": "How many conflicts has Pakistan been a party to?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts are ongoing in Europe?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts are ongoing in Southeast Asia?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "What conflicts involve state actors from the Caribbean?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "How many conflicts are currently taking place in Latin America?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "Which conflicts are occurring in Western Europe?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "Which conflicts are occurring in Eastern Europe?"
+    },
+    {
+        "category": "2. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Taking Place in Geographical Region or Involving Country/State Actors from Geographical Region",
+        "question": "Are there any active conflicts in Central Asia?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts have involved both Iran and Saudi Arabia?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "Have China and Taiwan been involved in any armed conflicts?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "What conflicts have involved Ethiopia and Sudan?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "Which conflicts involved the USA and North Korea?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "Have Egypt and Ethiopia been involved in the same armed conflicts?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Are there more conflicts involving South America or Africa?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Which NATO countries are involved in the most conflicts?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Are there more conflicts involving ASEAN countries or EU countries?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "Which Middle Eastern countries have been involved in the most conflicts?"
+    },
+    {
+        "category": "4. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Multiple Country/State Actors (USED FOR COMPARISON)",
+        "question": "How does conflict involvement differ between G7 and BRICS states?"
+    },
+    {
+        "category": "8. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflicts Ranked by Casualties or Intensity",
+        "question": "What are the deadliest conflicts in Africa?"
+    },
+    {
+        "category": "8. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflicts Ranked by Casualties or Intensity",
+        "question": "Which conflicts have the highest civilian casualties?"
+    },
+    {
+        "category": "9. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflicts with Legal Ambiguities or IHL Violations",
+        "question": "Are there conflicts with disputed IHL classifications?"
+    },
+    {
+        "category": "9. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflicts with Legal Ambiguities or IHL Violations",
+        "question": "What conflicts have been subject to IHL controversy?"
+    },
+    {
+        "category": "10. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflicts Involving Political or Military Alliances",
+        "question": "How many conflicts involve African Union member states?"
+    },
+    {
+        "category": "10. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflicts Involving Political or Military Alliances",
+        "question": "What conflicts are NATO countries currently involved in?"
+    },
+    {
+        "category": "6. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving an Individual Non-State Actor",
+        "question": "Which non-state actors are involved in the Syrian Civil War?"
+    },
+    {
+        "category": "5. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) by Conflict Classification Type",
+        "question": "How many conflicts are classified as both NIAC and IAC?"
+    },
+    {
+        "category": "3. Retrieve Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving Same Two Country/State Actors",
+        "question": "How many IACS and NIACS in Asia?"
+    }
+]

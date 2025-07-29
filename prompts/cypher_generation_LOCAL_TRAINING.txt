@@ -1,0 +1,2550 @@
+Generate a Cypher query based on a research question to retrieve conflict-related data, including relevant countries, state actors, non-state actors, geographical regions, and conflict classifications.
+Important Requirements for Cypher Queries
+
+    Primary Goal: Ensure the query retrieves relevant conflict data.
+    Return Structure:
+        Always return a structured object named RULAC_research.
+        Inside this object, include:
+        
+        
+        1. summary 
+
+    A human-readable summary of the findings, formatted as a sentence or paragraph.
+    If no conflicts are found, the summary should state that explicitly.
+    If conflicts are found, the summary should describe the number of conflicts, their types, and any key insights.
+        
+        
+ 2.  a list conflict_details containing:
+            Conflict name, classification, overview, applicable IHL laws, involved parties, and citation.
+    Strict Schema Adherence:
+        Use only the provided schema's node labels, relationships, and properties.
+        Do not invent new properties or relationships.
+
+# Instructions:
+1. Identify any actors, regions, or conflict types mentioned in the question.
+2. Use **only** the relationship types and properties provided in the schema. Do not use anything else that is not in the schema.
+3. Ensure the query retrieves all conflicts, state actors, non-state actors, classifications, and other properties as shown in the examples.
+4. Avoid directly matching conflicts by name (e.g., MATCH (c:Conflict {{name: "Syrian Civil War"}})). Instead, match conflicts using the UN M49 code of the relevant country or state actor. This is because the conflict names may vary.
+4b. In the same way, never match a NonStateActor directly by the name, but rather by name and alias, and always including lowercase comparisons for flexible retreival. eg. 
+"WHERE toLower(actor.name) CONTAINS toLower(actor_name)
+   OR any(alias IN actor.aliases WHERE toLower(alias) CONTAINS toLower(actor_name))" 
+6. Ignore dates in the query, as all conflicts are considered actively present and generally relevent to the question.
+7. Use the `conflict_details` array to store the details of each conflict.
+
+
+11. Use the hierarchical UN M49 codes to handle geographical regions correctly. (See the detailed codes below.)
+
+Hierarchical UN M49 Regional Grouping:
+World (001)
+  ├── Africa (002)
+  │   ├── Northern Africa (015)
+  │   ├── Sub-Saharan Africa (202)
+  │   │   ├── Eastern Africa (014)
+  │   │   ├── Middle Africa (017)
+  │   │   ├── Southern Africa (018)
+  │   │   └── Western Africa (011)
+  ├── Americas (019)
+  │   ├── North America (003)
+  │   │   ├── Northern America (021)
+  │   │   ├── Caribbean (029)
+  │   │   └── Central America (013)
+  │   └── Latin America and the Caribbean (419)
+  │       ├── Caribbean (029)
+  │       ├── Central America (013)
+  │       └── South America (005)
+  ├── Antarctica (010)
+  ├── Asia (142)
+  │   ├── Central Asia (143)
+  │   ├── Eastern Asia (030)
+  │   ├── South-Eastern Asia (035)
+  │   ├── Southern Asia (034)
+  │   └── Western Asia (145)
+  ├── Europe (150)
+  │   ├── Eastern Europe (151)
+  │   ├── Northern Europe (154)
+  │   ├── Southern Europe (039)
+  │   └── Western Europe (155)
+  └── Oceania (009)
+      └── Small Island Developing States (SIDS) (722)
+
+729 for modern Sudan after the separation of South Sudan in 2011
+
+Use the hierarchical UN M49 regional groupings to determine whether to match conflicts to a specific region (e.g., Central America (013)) or if it should be summed up for a broader region. Do not associate the same conflict to both a parent region and its subregion at the same time.
+
+BRICS Countries and their UN M49 Codes:
+    Brazil: 076
+    Russia: 643
+    India: 356
+    China: 156
+    South Africa: 710
+    Egypt: 818
+    Ethiopia: 231
+    Indonesia: 360
+    Iran: 364
+    United Arab Emirates (UAE): 784
+
+   
+Political groupings:
+// Define the list of UN M49 Codes for European Union member states
+WITH [
+    "040", "056", "100", "191", "196", "203", "208", "233", 
+    "246", "250", "276", "300", "348", "372", "380", "428", 
+    "440", "442", "470", "528", "616", "620", "642", "703", 
+    "705", "724", "752"
+] AS european_union_member_codes
+
+
+// Define the list of UN M49 Codes for African Union member states
+WITH [
+    "108", "120", "140", "148", "178", "180", "226", "266", "678",  // Central Africa
+    "174", "262", "232", "231", "404", "450", "480", "646", "690", "706", "728", "729", "834", "800",  // Eastern Africa
+    "012", "818", "434", "478", "504", "732", "788",  // Northern Africa
+    "024", "072", "748", "426", "454", "508", "516", "710", "894", "716",  // Southern Africa
+    "204", "854", "132", "384", "270", "288", "324", "624", "430", "466", "562", "566", "686", "694", "768"  // Western Africa
+] AS african_union_member_codes
+
+// Define the list of UN M49 Codes for G7 and BRICS countries
+WITH [
+    "124", "250", "276", "380", "392", "826", "840"  // G7 countries: Canada (124), France (250), Germany (276), Italy (380), Japan (392), United Kingdom (826), USA (840)
+] AS g7_codes,
+[
+    "076", "643", "356", "156", "710", "818", "231", "360", "364", "784"  // BRICS countries: Brazil (076), Russia (643), India (356), China (156), South Africa (710), Egypt (818), Ethiopia (231), Indonesia (360), Iran (364), United Arab Emirates (784)
+] AS brics_codes
+
+// Define the list of UN M49 Codes for NATO countries
+WITH [
+    "008",  // Albania
+    "056",  // Belgium
+    "100",  // Bulgaria
+    "124",  // Canada
+    "191",  // Croatia
+    "203",  // Czech Republic
+    "208",  // Denmark
+    "233",  // Estonia
+    "246",  // Finland
+    "250",  // France
+    "276",  // Germany
+    "300",  // Greece
+    "348",  // Hungary
+    "352",  // Iceland
+    "380",  // Italy
+    "428",  // Latvia
+    "440",  // Lithuania
+    "442",  // Luxembourg
+    "499",  // Montenegro
+    "528",  // Netherlands
+    "807",  // North Macedonia
+    "578",  // Norway
+    "616",  // Poland
+    "620",  // Portugal
+    "642",  // Romania
+    "703",  // Slovakia
+    "705",  // Slovenia
+    "724",  // Spain
+    "752",  // Sweden
+    "792",  // Turkey
+    "826",  // United Kingdom
+    "840"   // United States
+] AS nato_codes
+
+// Define the list of UN M49 Codes for ASEAN countries
+WITH [
+    "096",  // Brunei
+    "116",  // Cambodia
+    "360",  // Indonesia
+    "418",  // Laos
+    "458",  // Malaysia
+    "104",  // Myanmar
+    "608",  // Philippines
+    "702",  // Singapore
+    "764",  // Thailand
+    "704"   // Vietnam
+] AS asean_codes
+
+
+# Schema
+{schema}
+
+
+# Examples
+
+## Example 1 (Retreive (all) conflict data based on country or state actor involvement)
+Research Question: What conflicts is France involved in as a state party to the conflict?
+Generated Query:
+// Retreive (all) conflict data based on country or state actor involvement
+MATCH (sa:StateActor) 
+WHERE sa.UN_M49Code IN ["250"] // France 
+WITH sa.name AS country_name 
+
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    country_name,
+    c,  // ✅ Ensure `c` is passed forward
+    ct,
+    COUNT(DISTINCT c) AS total_conflicts,
+    COUNT(DISTINCT CASE WHEN ct.type = "International Armed Conflict (IAC)" THEN c END) AS total_IAC,
+    COUNT(DISTINCT CASE WHEN ct.type = "Non-International Armed Conflict (NIAC)" THEN c END) AS total_NIAC,
+    COUNT(DISTINCT CASE WHEN ct.type = "Military Occupation" THEN c END) AS total_Military_Occupation,
+    COLLECT(DISTINCT c.name) AS conflict_names,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    total_conflicts,
+    total_IAC,
+    total_NIAC,
+    total_Military_Occupation,
+    conflict_names,
+    COALESCE(COLLECT(DISTINCT {{
+        conflict_name: COALESCE(c.name, "Unknown"),  // ✅ Now `c` is defined
+        conflict_classification: COALESCE(ct.type, "Unclassified"),
+        conflict_overview: COALESCE(c.overview, "No Overview Available"),
+        applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+        conflict_citation: COALESCE(c.citation, "No Citation Available"),
+        state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+            THEN "No state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+        END,
+        non_state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+            THEN "No non-state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+        END
+    }}), []) AS conflict_details
+
+WITH 
+    country_name,
+    total_conflicts,
+    total_IAC,
+    total_NIAC,
+    total_Military_Occupation,
+    CASE 
+        WHEN total_conflicts = 0 THEN []
+        ELSE conflict_details
+    END AS final_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            "According to RULAC, there are currently no recorded armed conflicts involving " + country_name + " as a state party."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_conflicts) + 
+            " total distinct armed conflict(s) involving " + country_name + 
+            " as a party to conflict. Breakdown: " +
+            toString(total_IAC) + " International Armed Conflicts (IAC), " +
+            toString(total_NIAC) + " Non-International Armed Conflicts (NIAC), " +
+            toString(total_Military_Occupation) + " Military Occupations. Conflicts: " +
+            apoc.text.join(conflict_names, ", ")
+    END AS summary_text
+
+RETURN {{ 
+    summary: summary_text,
+    conflict_details: final_conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+## Example 1b (Retreive (all) conflict data based on country or state actor involvement)
+Research Question: "How many conflicts is the USA involved in? What are their names?"
+Generated Query:
+MATCH (sa:StateActor)
+WHERE sa.UN_M49Code IN ["840"]  // 840: USA
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    sa.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    COALESCE(COUNT(DISTINCT c), 0) AS total_conflicts,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "International Armed Conflict (IAC)" THEN c END), 0) AS total_IAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Non-International Armed Conflict (NIAC)" THEN c END), 0) AS total_NIAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Military Occupation" THEN c END), 0) AS total_Military_Occupation,
+    COALESCE(COLLECT(DISTINCT c.name), []) AS conflict_names,
+    COALESCE(COLLECT(DISTINCT {{
+        conflict_name: COALESCE(c.name, "Unknown"),
+        conflict_classification: COALESCE(ct.type, "Unclassified"),
+        conflict_overview: COALESCE(c.overview, "No Overview Available"),
+        applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+        conflict_citation: COALESCE(c.citation, "No Citation Available"),
+        state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+            THEN "No state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+        END,
+        non_state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+            THEN "No non-state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+        END
+    }}), []) AS conflict_details
+
+WITH 
+    country_name,
+    total_conflicts,
+    total_IAC,
+    total_NIAC,
+    total_Military_Occupation,
+    CASE 
+        WHEN total_conflicts = 0 THEN []
+        ELSE conflict_details
+    END AS final_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            "According to RULAC, there are currently no recorded armed conflicts involving " + country_name + " as a state party."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_conflicts) + 
+            " total distinct armed conflict(s) involving " + country_name + 
+            " as a party to conflict. Breakdown: " +
+            toString(total_IAC) + " International Armed Conflicts (IAC), " +
+            toString(total_NIAC) + " Non-International Armed Conflicts (NIAC), " +
+            toString(total_Military_Occupation) + " Military Occupations. Conflicts: " +
+            apoc.text.join(conflict_names, ", ")
+    END AS summary_text
+
+RETURN {{
+    summary: summary_text,
+    conflict_details: final_conflict_details
+}} AS RULAC_research
+
+
+
+
+
+## Example 2 (Retreive (IHL) conflict data based on country or state actor involvement)
+Research Question: "What IHL law applies to the conflict in Ukraine?"
+Generated Query:
+MATCH (sa:StateActor)
+WHERE sa.UN_M49Code IN ["804"]  // 804: Ukraine
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    sa.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    COALESCE(COUNT(DISTINCT c), 0) AS total_conflicts,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "International Armed Conflict (IAC)" THEN c END), 0) AS total_IAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Non-International Armed Conflict (NIAC)" THEN c END), 0) AS total_NIAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Military Occupation" THEN c END), 0) AS total_Military_Occupation,
+    COALESCE(COLLECT(DISTINCT c.name), []) AS conflict_names,
+    COALESCE(COLLECT(DISTINCT {{
+        conflict_name: COALESCE(c.name, "Unknown"),
+        conflict_classification: COALESCE(ct.type, "Unclassified"),
+        conflict_overview: COALESCE(c.overview, "No Overview Available"),
+        applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+        conflict_citation: COALESCE(c.citation, "No Citation Available"),
+        state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+            THEN "No state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+        END,
+        non_state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+            THEN "No non-state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+        END
+    }}), []) AS conflict_details
+
+WITH 
+    country_name,
+    total_conflicts,
+    total_IAC,
+    total_NIAC,
+    total_Military_Occupation,
+    CASE 
+        WHEN total_conflicts = 0 THEN []
+        ELSE conflict_details
+    END AS final_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            "According to RULAC, there are currently no recorded armed conflicts involving " + country_name + " as a state party."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_conflicts) + 
+            " total distinct armed conflict(s) involving " + country_name + 
+            " as a party to conflict. Breakdown: " +
+            toString(total_IAC) + " International Armed Conflicts (IAC), " +
+            toString(total_NIAC) + " Non-International Armed Conflicts (NIAC), " +
+            toString(total_Military_Occupation) + " Military Occupations. Conflicts: " +
+            apoc.text.join(conflict_names, ", ")
+    END AS summary_text
+
+RETURN {{
+    summary: summary_text,
+    conflict_details: final_conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 3 (Retreive (conflict classification) conflict data based on country or state actor involvement)
+Research Question: "What is the classification of the conflicts involving the state actor Syria?"
+Generated Query:
+MATCH (sa:StateActor)
+WHERE sa.UN_M49Code IN ["760"]  // 760: Syria
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    sa.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    COALESCE(COUNT(DISTINCT c), 0) AS total_conflicts,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "International Armed Conflict (IAC)" THEN c END), 0) AS total_IAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Non-International Armed Conflict (NIAC)" THEN c END), 0) AS total_NIAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Military Occupation" THEN c END), 0) AS total_Military_Occupation,
+    COALESCE(COLLECT(DISTINCT c.name), []) AS conflict_names,
+    COALESCE(COLLECT(DISTINCT {{
+        conflict_name: COALESCE(c.name, "Unknown"),
+        conflict_classification: COALESCE(ct.type, "Unclassified"),
+        conflict_overview: COALESCE(c.overview, "No Overview Available"),
+        applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+        conflict_citation: COALESCE(c.citation, "No Citation Available"),
+        state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+            THEN "No state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+        END,
+        non_state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+            THEN "No non-state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+        END
+    }}), []) AS conflict_details
+
+WITH 
+    country_name,
+    total_conflicts,
+    total_IAC,
+    total_NIAC,
+    total_Military_Occupation,
+    CASE 
+        WHEN total_conflicts = 0 THEN []
+        ELSE conflict_details
+    END AS final_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            "According to RULAC, there are currently no recorded armed conflicts involving " + country_name + " as a state party."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_conflicts) + 
+            " total distinct armed conflict(s) involving " + country_name + 
+            " as a party to conflict. Breakdown: " +
+            toString(total_IAC) + " International Armed Conflicts (IAC), " +
+            toString(total_NIAC) + " Non-International Armed Conflicts (NIAC), " +
+            toString(total_Military_Occupation) + " Military Occupations. Conflicts: " +
+            apoc.text.join(conflict_names, ", ")
+    END AS summary_text
+
+RETURN {{
+    summary: summary_text,
+    conflict_details: final_conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 3b (Retreive conflict data based geographical location of conflict, ie. taking place in country)
+Research Question: "What is the classification of the conflict taking place in South Africa?"
+Generated Query:
+MATCH (co:Country) 
+WHERE co.UN_M49Code = "710"  // 710 is South Africa
+OPTIONAL MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(co)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    co.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    COALESCE(COUNT(DISTINCT c), 0) AS total_conflicts,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "International Armed Conflict (IAC)" THEN c END), 0) AS total_IAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Non-International Armed Conflict (NIAC)" THEN c END), 0) AS total_NIAC,
+    COALESCE(COUNT(DISTINCT CASE WHEN ct.type = "Military Occupation" THEN c END), 0) AS total_Military_Occupation,
+    COALESCE(COLLECT(DISTINCT c.name), []) AS conflict_names,
+    COALESCE(COLLECT(DISTINCT {{
+        conflict_name: COALESCE(c.name, "Unknown"),
+        conflict_classification: COALESCE(ct.type, "Unclassified"),
+        conflict_overview: COALESCE(c.overview, "No Overview Available"),
+        applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+        conflict_citation: COALESCE(c.citation, "No Citation Available"),
+        state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+            THEN "No state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+        END,
+        non_state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+            THEN "No non-state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+        END
+    }}), []) AS conflict_details
+
+WITH 
+    country_name,
+    total_conflicts,
+    total_IAC,
+    total_NIAC,
+    total_Military_Occupation,
+    CASE 
+        WHEN total_conflicts = 0 THEN []
+        ELSE conflict_details
+    END AS final_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            "According to RULAC, there are currently no recorded armed conflicts taking place in " + country_name + "."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_conflicts) + 
+            " total distinct armed conflict(s) taking place in " + country_name + 
+            ". Breakdown: " +
+            toString(total_IAC) + " International Armed Conflicts (IAC), " +
+            toString(total_NIAC) + " Non-International Armed Conflicts (NIAC), " +
+            toString(total_Military_Occupation) + " Military Occupations. Conflicts: " +
+            apoc.text.join(conflict_names, ", ")
+    END AS summary_text
+
+RETURN {{
+    summary: summary_text,
+    conflict_details: final_conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 6a. (Comparing conflicts between state actors)
+Research Question: "What conflicts have involved Ukraine or Saudi Arabia?"
+Generated Query:
+MATCH (sa:StateActor)
+WHERE sa.UN_M49Code IN ["804", "682"]  // 804: Ukraine, 682: Saudi Arabia
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    sa.name AS country_name,
+    sa.UN_M49Code AS state_UN_M49Code,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    state_UN_M49Code,
+    COALESCE(COUNT(DISTINCT c), 0) AS total_conflicts,
+    COALESCE(COLLECT(DISTINCT c.name), []) AS conflict_names,
+    COLLECT(DISTINCT CASE 
+        WHEN c IS NULL THEN NULL
+        ELSE {{
+            conflict_name: COALESCE(c.name, "Unknown"),
+            conflict_classification: COALESCE(ct.type, "Unclassified"),
+            conflict_overview: COALESCE(c.overview, "No Overview Available"),
+            applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+            conflict_citation: COALESCE(c.citation, "No Citation Available"),
+            state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+                THEN "No state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+            END,
+            non_state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+                THEN "No non-state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+            END
+        }}
+    END) AS conflicts_per_state
+
+WITH 
+    COLLECT({{
+        state_name: country_name,
+        state_UN_M49Code: state_UN_M49Code,
+        total_conflicts: total_conflicts,
+        conflict_names: [name IN conflict_names WHERE name IS NOT NULL],
+        conflicts_per_state: [conflict IN conflicts_per_state WHERE conflict.conflict_name IS NOT NULL]
+    }}) AS state_conflict_summary
+
+WITH 
+    state_conflict_summary,
+    apoc.coll.flatten([s IN state_conflict_summary | s.conflicts_per_state]) AS conflict_details,
+    state_conflict_summary[0] AS state_1_data,
+    state_conflict_summary[1] AS state_2_data
+
+RETURN {{
+    summary: CASE 
+        WHEN size(state_conflict_summary) < 2 THEN
+            "Insufficient data to compare conflicts for the requested states."
+        WHEN state_1_data.total_conflicts = 0 AND state_2_data.total_conflicts = 0 THEN
+            "According to RULAC, neither " + state_1_data.state_name + " nor " + state_2_data.state_name + " are currently party to any conflicts."
+        WHEN state_1_data.total_conflicts = 0 THEN
+            "According to RULAC, " + state_1_data.state_name + " is not currently party to any conflicts. Meanwhile, " + state_2_data.state_name + " is a state party to " + toString(state_2_data.total_conflicts) + " total conflicts: " + apoc.text.join(state_2_data.conflict_names, ", ") + "."
+        WHEN state_2_data.total_conflicts = 0 THEN
+            "According to RULAC, " + state_2_data.state_name + " is not currently party to any conflicts. Meanwhile, " + state_1_data.state_name + " is a state party to " + toString(state_1_data.total_conflicts) + " total conflicts: " + apoc.text.join(state_1_data.conflict_names, ", ") + "."
+        WHEN state_1_data.total_conflicts > state_2_data.total_conflicts THEN 
+            "According to RULAC, in a comparison between " + state_1_data.state_name + " and " + state_2_data.state_name + 
+            ", the state currently party to the most distinct armed conflicts is " + state_1_data.state_name + 
+            ", being a state party to " + toString(state_1_data.total_conflicts) + " total conflicts: " + 
+            apoc.text.join(state_1_data.conflict_names, ", ") + ". Meanwhile, " + state_2_data.state_name + " is a state party to " + 
+            toString(state_2_data.total_conflicts) + " total conflicts: " + apoc.text.join(state_2_data.conflict_names, ", ") + "."
+        ELSE 
+            "According to RULAC, in a comparison between " + state_1_data.state_name + " and " + state_2_data.state_name + 
+            ", both states are equally party to " + toString(state_1_data.total_conflicts) + " total conflicts. " + 
+            state_1_data.state_name + " is party to: " + apoc.text.join(state_1_data.conflict_names, ", ") + ". " + 
+            state_2_data.state_name + " is party to: " + apoc.text.join(state_2_data.conflict_names, ", ") + "."
+    END,
+    conflict_details: conflict_details
+}} AS RULAC_research
+
+
+## Example 6b. (Comparing conflicts between state actors)
+Research Question: "Are there more conflicts involving Russia or the USA as state actors?"
+Generated Query:
+MATCH (sa:StateActor)
+WHERE sa.UN_M49Code IN ["643", "840"]  // 643: Russia, 840: USA
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    sa.name AS country_name,
+    sa.UN_M49Code AS state_UN_M49Code,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    state_UN_M49Code,
+    COALESCE(COUNT(DISTINCT c), 0) AS total_conflicts,
+    COALESCE(COLLECT(DISTINCT c.name), []) AS conflict_names,
+    COLLECT(DISTINCT CASE 
+        WHEN c IS NULL THEN NULL
+        ELSE {{
+            conflict_name: COALESCE(c.name, "Unknown"),
+            conflict_classification: COALESCE(ct.type, "Unclassified"),
+            conflict_overview: COALESCE(c.overview, "No Overview Available"),
+            applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+            conflict_citation: COALESCE(c.citation, "No Citation Available"),
+            state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+                THEN "No state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+            END,
+            non_state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+                THEN "No non-state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+            END
+        }}
+    END) AS conflicts_per_state
+
+WITH 
+    COLLECT({{
+        state_name: country_name,
+        state_UN_M49Code: state_UN_M49Code,
+        total_conflicts: total_conflicts,
+        conflict_names: [name IN conflict_names WHERE name IS NOT NULL],
+        conflicts_per_state: [conflict IN conflicts_per_state WHERE conflict.conflict_name IS NOT NULL]
+    }}) AS state_conflict_summary
+
+WITH 
+    state_conflict_summary,
+    apoc.coll.flatten([s IN state_conflict_summary | s.conflicts_per_state]) AS conflict_details,
+    state_conflict_summary[0] AS state_1_data,
+    state_conflict_summary[1] AS state_2_data
+
+RETURN {{
+    summary: CASE 
+        WHEN size(state_conflict_summary) < 2 THEN
+            "Insufficient data to compare conflicts for the requested states."
+        WHEN state_1_data.total_conflicts = 0 AND state_2_data.total_conflicts = 0 THEN
+            "According to RULAC, neither " + state_1_data.state_name + " nor " + state_2_data.state_name + " are currently party to any conflicts."
+        WHEN state_1_data.total_conflicts = 0 THEN
+            "According to RULAC, " + state_1_data.state_name + " is not currently party to any conflicts. Meanwhile, " + state_2_data.state_name + " is a state party to " + toString(state_2_data.total_conflicts) + " total conflicts: " + apoc.text.join(state_2_data.conflict_names, ", ") + "."
+        WHEN state_2_data.total_conflicts = 0 THEN
+            "According to RULAC, " + state_2_data.state_name + " is not currently party to any conflicts. Meanwhile, " + state_1_data.state_name + " is a state party to " + toString(state_1_data.total_conflicts) + " total conflicts: " + apoc.text.join(state_1_data.conflict_names, ", ") + "."
+        WHEN state_1_data.total_conflicts > state_2_data.total_conflicts THEN 
+            "According to RULAC, in a comparison between " + state_1_data.state_name + " and " + state_2_data.state_name + 
+            ", the state currently party to the most distinct armed conflicts is " + state_1_data.state_name + 
+            ", being a state party to " + toString(state_1_data.total_conflicts) + " total conflicts: " + 
+            apoc.text.join(state_1_data.conflict_names, ", ") + ". Meanwhile, " + state_2_data.state_name + " is a state party to " + 
+            toString(state_2_data.total_conflicts) + " total conflicts: " + apoc.text.join(state_2_data.conflict_names, ", ") + "."
+        ELSE 
+            "According to RULAC, in a comparison between " + state_1_data.state_name + " and " + state_2_data.state_name + 
+            ", both states are equally party to " + toString(state_1_data.total_conflicts) + " total conflicts. " + 
+            state_1_data.state_name + " is party to: " + apoc.text.join(state_1_data.conflict_names, ", ") + ". " + 
+            state_2_data.state_name + " is party to: " + apoc.text.join(state_2_data.conflict_names, ", ") + "."
+    END,
+    conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 5 (Geographical regional grouping by UN M49 group):
+Research Question: "What conflicts involve state actors from West Africa?"
+MATCH (gr:GeoRegion)
+WHERE gr.UN_M49Code IN ["011"]  // 011: West Africa
+OPTIONAL MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(country:Country)-[:BELONGS_TO]->(gr)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    gr.name AS region_name,
+    gr.UN_M49Code AS geo_region_UN_M49Code,  // Capture the UN M49 code for display in the summary
+    country.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    region_name,
+    geo_region_UN_M49Code,
+    country_name,
+    COUNT(DISTINCT c) AS total_conflicts_per_country,
+    CASE 
+        WHEN COUNT(DISTINCT c) = 0 THEN []
+        ELSE COLLECT(DISTINCT {{
+            conflict_name: COALESCE(c.name, "Unknown"),
+            conflict_classification: COALESCE(ct.type, "Unclassified"),
+            conflict_overview: COALESCE(c.overview, "No Overview Available"),
+            applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+            conflict_citation: COALESCE(c.citation, "No Citation Available"),
+            state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+                THEN "No state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+            END,
+            non_state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+                THEN "No non-state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+            END
+        }})
+    END AS conflict_details
+
+WITH 
+    region_name,
+    geo_region_UN_M49Code,
+    country_name,
+    total_conflicts_per_country,
+    conflict_details,
+    CASE 
+        WHEN total_conflicts_per_country = 0 THEN ""
+        ELSE apoc.text.join([conflict IN conflict_details | conflict.conflict_name], ", ")
+    END AS conflict_names_per_country
+
+WITH 
+    region_name,
+    geo_region_UN_M49Code,
+    COLLECT(
+        CASE 
+            WHEN total_conflicts_per_country = 0 THEN NULL
+            ELSE toString(total_conflicts_per_country) + " conflicts involving " + country_name + ": " + conflict_names_per_country
+        END
+    ) AS total_conflicts_by_country,
+    COLLECT(conflict_details) AS all_conflicts_per_country
+
+WITH 
+    region_name,
+    geo_region_UN_M49Code,
+    [t IN total_conflicts_by_country WHERE t IS NOT NULL] AS filtered_conflicts_by_country,
+    apoc.coll.flatten(all_conflicts_per_country) AS conflict_details
+
+WITH 
+    region_name,
+    geo_region_UN_M49Code,
+    filtered_conflicts_by_country,
+    conflict_details,
+    CASE 
+        WHEN conflict_details = [] THEN 0 
+        ELSE size(apoc.coll.toSet([d IN conflict_details | d.conflict_name]))
+    END AS total_distinct_conflicts
+
+RETURN {{
+    summary: CASE 
+        WHEN total_distinct_conflicts = 0 THEN
+            "According to RULAC, there are currently no recorded armed conflicts involving state actors from " + region_name + 
+            " (as grouped by UN M49 code: " + geo_region_UN_M49Code + ")."
+        ELSE
+            "According to RULAC, state actors from " + region_name + 
+            " (as grouped by UN M49 code: " + geo_region_UN_M49Code + ") are currently party to a total of " + 
+            toString(total_distinct_conflicts) + " distinct armed conflicts. Breakdown by state actor: " + 
+            apoc.text.join(filtered_conflicts_by_country, "; ")
+    END,
+    conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 5b1 (Political regional grouping):
+Research Question: "What is the total number of conflicts involving European Union member states?"
+Generated Query:
+// Define the list of UN M49 Codes for European Union member states
+WITH [
+    "040", "056", "100", "191", "196", "203", "208", "233", 
+    "246", "250", "276", "300", "348", "372", "380", "428", 
+    "440", "442", "470", "528", "616", "620", "642", "703", 
+    "705", "724", "752"
+] AS group_UN_M49Codes, " the European Union" AS group_name
+
+WITH group_UN_M49Codes, group_name, size(group_UN_M49Codes) AS number_of_members
+
+// Match conflicts involving member states
+MATCH (sa:StateActor)
+WHERE sa.UN_M49Code IN group_UN_M49Codes
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    group_name,
+    number_of_members,
+    sa.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    group_name,
+    number_of_members,
+    country_name,
+    COUNT(DISTINCT c) AS total_conflicts_per_country,
+    CASE 
+        WHEN COUNT(DISTINCT c) = 0 THEN []
+        ELSE COLLECT(DISTINCT {{
+            conflict_name: COALESCE(c.name, "Unknown"),
+            conflict_classification: COALESCE(ct.type, "Unclassified"),
+            conflict_overview: COALESCE(c.overview, "No Overview Available"),
+            applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+            conflict_citation: COALESCE(c.citation, "No Citation Available"),
+            state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+                THEN "No state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+            END,
+            non_state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+                THEN "No non-state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+            END
+        }})
+    END AS conflict_details
+
+WITH 
+    group_name,
+    number_of_members,
+    country_name,
+    total_conflicts_per_country,
+    conflict_details,
+    CASE 
+        WHEN total_conflicts_per_country = 0 THEN ""
+        ELSE apoc.text.join([conflict IN conflict_details | conflict.conflict_name], ", ")
+    END AS conflict_names_per_country
+
+WITH 
+    group_name,
+    number_of_members,
+    COLLECT(
+        CASE 
+            WHEN total_conflicts_per_country = 0 THEN NULL
+            ELSE toString(total_conflicts_per_country) + " conflicts involving " + country_name + ": " + conflict_names_per_country
+        END
+    ) AS total_conflicts_by_country,
+    COLLECT(conflict_details) AS all_conflicts_per_country
+
+WITH 
+    group_name,
+    number_of_members,
+    [t IN total_conflicts_by_country WHERE t IS NOT NULL] AS filtered_conflicts_by_country,
+    apoc.coll.flatten(all_conflicts_per_country) AS conflict_details
+
+WITH 
+    group_name,
+    number_of_members,
+    filtered_conflicts_by_country,
+    conflict_details,
+    CASE 
+        WHEN conflict_details = [] THEN 0 
+        ELSE size(apoc.coll.toSet([d IN conflict_details | d.conflict_name]))
+    END AS total_distinct_conflicts
+
+RETURN {{
+    summary: CASE 
+        WHEN total_distinct_conflicts = 0 THEN
+            "According to RULAC, there are currently no recorded armed conflicts involving state actors from " + group_name + 
+            " (" + toString(number_of_members) + " members)."
+        ELSE
+            "According to RULAC, state actors from " + group_name + 
+            " (" + toString(number_of_members) + " members) are currently party to a total of " + 
+            toString(total_distinct_conflicts) + " distinct armed conflicts. Breakdown by member state: " + 
+            apoc.text.join(filtered_conflicts_by_country, "; ")
+    END,
+    conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 5b2 (Political regional grouping):
+Research Question: "What is the total number of conflicts involving African Union member states?"
+Generated Query:
+// Define the list of UN M49 Codes for African Union member states
+WITH [
+    "108", "120", "140", "148", "178", "180", "226", "266", "678",  // Central Africa
+    "174", "262", "232", "231", "404", "450", "480", "646", "690", "706", "728", "729", "834", "800",  // Eastern Africa
+    "012", "818", "434", "478", "504", "732", "788",  // Northern Africa
+    "024", "072", "748", "426", "454", "508", "516", "710", "894", "716",  // Southern Africa
+    "204", "854", "132", "384", "270", "288", "324", "624", "430", "466", "562", "566", "686", "694", "768"  // Western Africa
+] AS group_UN_M49Codes, " the African Union" AS group_name
+
+WITH group_UN_M49Codes, group_name, size(group_UN_M49Codes) AS number_of_members
+
+// Match conflicts involving member states
+MATCH (sa:StateActor)
+WHERE sa.UN_M49Code IN group_UN_M49Codes
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    group_name,
+    number_of_members,
+    sa.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    group_name,
+    number_of_members,
+    country_name,
+    COUNT(DISTINCT c) AS total_conflicts_per_country,
+    CASE 
+        WHEN COUNT(DISTINCT c) = 0 THEN []
+        ELSE COLLECT(DISTINCT {{
+            conflict_name: COALESCE(c.name, "Unknown"),
+            conflict_classification: COALESCE(ct.type, "Unclassified"),
+            conflict_overview: COALESCE(c.overview, "No Overview Available"),
+            applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+            conflict_citation: COALESCE(c.citation, "No Citation Available"),
+            state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+                THEN "No state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+            END,
+            non_state_parties: CASE 
+                WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+                THEN "No non-state actors recorded" 
+                ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+            END
+        }})
+    END AS conflict_details
+
+WITH 
+    group_name,
+    number_of_members,
+    country_name,
+    total_conflicts_per_country,
+    conflict_details,
+    CASE 
+        WHEN total_conflicts_per_country = 0 THEN ""
+        ELSE apoc.text.join([conflict IN conflict_details | conflict.conflict_name], ", ")
+    END AS conflict_names_per_country
+
+WITH 
+    group_name,
+    number_of_members,
+    COLLECT(
+        CASE 
+            WHEN total_conflicts_per_country = 0 THEN NULL
+            ELSE toString(total_conflicts_per_country) + " conflicts involving " + country_name + ": " + conflict_names_per_country
+        END
+    ) AS total_conflicts_by_country,
+    COLLECT(conflict_details) AS all_conflicts_per_country
+
+WITH 
+    group_name,
+    number_of_members,
+    [t IN total_conflicts_by_country WHERE t IS NOT NULL] AS filtered_conflicts_by_country,
+    apoc.coll.flatten(all_conflicts_per_country) AS conflict_details
+
+WITH 
+    group_name,
+    number_of_members,
+    filtered_conflicts_by_country,
+    conflict_details,
+    CASE 
+        WHEN conflict_details = [] THEN 0 
+        ELSE size(apoc.coll.toSet([d IN conflict_details | d.conflict_name]))
+    END AS total_distinct_conflicts
+
+RETURN {{
+    summary: CASE 
+        WHEN total_distinct_conflicts = 0 THEN
+            "According to RULAC, there are currently no recorded armed conflicts involving state actors from " + group_name + 
+            " (" + toString(number_of_members) + " members)."
+        ELSE
+            "According to RULAC, state actors from " + group_name + 
+            " (" + toString(number_of_members) + " members) are currently party to a total of " + 
+            toString(total_distinct_conflicts) + " distinct armed conflicts. Breakdown by member state: " + 
+            apoc.text.join(filtered_conflicts_by_country, "; ")
+    END,
+    conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 6a1. (Comparing conflicts between state actors across 2 geographic regions)
+Research Question: "Are there more conflicts involving South American or North American countries?"
+Generated Query:
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)-[:BELONGS_TO]->(gr:GeoRegion)
+WHERE gr.UN_M49Code IN ["005", "021"]  // 005: South America, 021: North America
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH
+  sa.name AS country_name,
+  gr.name AS group_name,
+  gr.UN_M49Code AS geo_region_UN_M49Code,
+  c,
+  ct,
+  COLLECT(
+    DISTINCT {{
+      name: actor.name,
+      labels: labels(actor),
+      relationship_type: type(r)
+    }}
+  ) AS conflict_parties
+WITH
+  group_name,
+  geo_region_UN_M49Code,
+  {{
+    conflict_name: c.name,
+    conflict_classification: ct.type,
+    conflict_overview: c.overview,
+    applicable_ihl_law: c.applicable_law,
+    conflict_citation: c.citation,
+    state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+    non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+  }} AS conflict_detail
+WITH
+  group_name,
+  geo_region_UN_M49Code,
+  COLLECT(DISTINCT conflict_detail) AS conflicts_per_region  // Ensure distinct conflicts
+WITH
+  group_name,
+  geo_region_UN_M49Code,
+  conflicts_per_region,
+  size(conflicts_per_region) AS total_conflicts
+WITH
+  COLLECT({{
+    group_name: group_name,
+    geo_region_UN_M49Code: geo_region_UN_M49Code,
+    total_conflicts: total_conflicts,
+    conflict_names: [conflict IN conflicts_per_region | conflict.conflict_name],
+    conflicts_per_region: conflicts_per_region
+  }}) AS region_conflict_summary
+WITH
+  region_conflict_summary,
+  apoc.coll.max([r IN region_conflict_summary | r.total_conflicts]) AS max_conflicts
+WITH
+  region_conflict_summary,
+  max_conflicts,
+  [r IN region_conflict_summary WHERE r.total_conflicts = max_conflicts] AS most_conflicted_regions,  // Collect all regions with max_conflicts
+  apoc.coll.flatten([
+    region IN region_conflict_summary | 
+    region.group_name + " (as grouped by UN M49 code: " + region.geo_region_UN_M49Code + ") includes state actor involvement in " + 
+    toString(region.total_conflicts) + " conflict(s): " + 
+    apoc.text.join(apoc.coll.toSet(region.conflict_names), ", ")
+  ]) AS breakdown,  // Use apoc.coll.toSet to ensure unique conflict names
+  apoc.coll.flatten([region IN region_conflict_summary | region.conflicts_per_region]) AS conflict_details
+// Assign the summary text using a separate WITH clause
+WITH
+  region_conflict_summary,
+  max_conflicts,
+  most_conflicted_regions,
+  breakdown,
+  conflict_details,
+  CASE 
+    WHEN size(most_conflicted_regions) = 1 THEN 
+      "According to RULAC, the region with the most state actor involvement in armed conflicts is " + 
+      most_conflicted_regions[0].group_name + 
+      ", with state actors engaged in " + toString(max_conflicts) + " total conflicts."
+    ELSE 
+      "According to RULAC, " + 
+      apoc.text.join([r IN most_conflicted_regions | r.group_name], " and ") + 
+      " regions are equally involved in " + 
+      toString(max_conflicts) + " total conflicts."
+  END AS summary_text
+RETURN {{
+  summary: summary_text + " Breakdown by region: " + 
+            apoc.text.join(breakdown, "; "),
+  conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+## Example 6a2. (Comparing conflicts between state actors across 2 geographic regions)
+Research Question: "Are there more conflicts involving Middle Eastern or Asian countries?"
+Generated Query:
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)-[:BELONGS_TO]->(gr:GeoRegion)
+WHERE gr.UN_M49Code IN ["145", "142"]  // 145: Middle East region (Western Asia), 142: Asia region
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH
+  sa.name AS country_name,
+  gr.name AS group_name,
+  gr.UN_M49Code AS geo_region_UN_M49Code,
+  c,
+  ct,
+  COLLECT(
+    DISTINCT {{
+      name: actor.name,
+      labels: labels(actor),
+      relationship_type: type(r)
+    }}
+  ) AS conflict_parties
+WITH
+  group_name,
+  geo_region_UN_M49Code,
+  {{
+    conflict_name: c.name,
+    conflict_classification: ct.type,
+    conflict_overview: c.overview,
+    applicable_ihl_law: c.applicable_law,
+    conflict_citation: c.citation,
+    state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+    non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+  }} AS conflict_detail
+WITH
+  group_name,
+  geo_region_UN_M49Code,
+  COLLECT(DISTINCT conflict_detail) AS conflicts_per_region  // Ensure distinct conflicts
+WITH
+  group_name,
+  geo_region_UN_M49Code,
+  conflicts_per_region,
+  size(conflicts_per_region) AS total_conflicts
+WITH
+  COLLECT({{
+    group_name: group_name,
+    geo_region_UN_M49Code: geo_region_UN_M49Code,
+    total_conflicts: total_conflicts,
+    conflict_names: [conflict IN conflicts_per_region | conflict.conflict_name],
+    conflicts_per_region: conflicts_per_region
+  }}) AS region_conflict_summary
+WITH
+  region_conflict_summary,
+  apoc.coll.max([r IN region_conflict_summary | r.total_conflicts]) AS max_conflicts
+WITH
+  region_conflict_summary,
+  max_conflicts,
+  [r IN region_conflict_summary WHERE r.total_conflicts = max_conflicts] AS most_conflicted_regions,  // Collect all regions with max_conflicts
+  apoc.coll.flatten([
+    region IN region_conflict_summary | 
+    region.group_name + " (as grouped by UN M49 code: " + region.geo_region_UN_M49Code + ") includes state actor involvement in " + 
+    toString(region.total_conflicts) + " conflict(s): " + 
+    apoc.text.join(apoc.coll.toSet(region.conflict_names), ", ")
+  ]) AS breakdown,  // Use apoc.coll.toSet to ensure unique conflict names
+  apoc.coll.flatten([region IN region_conflict_summary | region.conflicts_per_region]) AS conflict_details
+// Assign the summary text using a separate WITH clause
+WITH
+  region_conflict_summary,
+  max_conflicts,
+  most_conflicted_regions,
+  breakdown,
+  conflict_details,
+  CASE 
+    WHEN size(most_conflicted_regions) = 1 THEN 
+      "According to RULAC, the region with the most state actor involvement in armed conflicts is " + 
+      most_conflicted_regions[0].group_name + 
+      ", with state actors engaged in " + toString(max_conflicts) + " total conflicts."
+    ELSE 
+      "According to RULAC, " + 
+      apoc.text.join([r IN most_conflicted_regions | r.group_name], " and ") + 
+      " regions are equally involved in " + 
+      toString(max_conflicts) + " total conflicts."
+  END AS summary_text
+RETURN {{
+  summary: summary_text + " Breakdown by region: " + 
+            apoc.text.join(breakdown, "; "),
+  conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 7a (Ranking most global country conflict involvement)
+Research Question: "Which countries are party to the most conflicts in the world?"
+Generated Query:
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH  
+    sa.name AS state_actor,
+    c,
+    ct,
+    COLLECT(DISTINCT {{  
+        name: actor.name,  
+        labels: labels(actor),  
+        relationship_type: type(r)  
+    }}) AS conflict_parties
+
+WITH  
+    state_actor,
+    COUNT(DISTINCT c) AS total_conflicts,
+    COLLECT({{  
+        conflict_name: c.name,  
+        conflict_classification: ct.type,  
+        conflict_overview: c.overview,  
+        applicable_ihl_law: c.applicable_law,  
+        conflict_citation: c.citation,  
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+    }}) AS conflict_details  
+ORDER BY total_conflicts DESC  
+LIMIT 10  
+
+WITH  
+    COLLECT({{  
+        state_actor: state_actor,  
+        total_conflicts: total_conflicts  
+    }}) AS state_actor_data,
+    apoc.coll.flatten(COLLECT(conflict_details)) AS conflict_details  // Flatten collected details
+
+WITH  
+    state_actor_data,
+    conflict_details,
+    [entry IN state_actor_data | entry.state_actor + " with " + toString(entry.total_conflicts) + " conflicts"] AS summary_list  
+
+RETURN {{  
+    summary: "According to RULAC, the top 10 countries currently party to the most conflicts in the past decade are: " +  
+             apoc.text.join(summary_list, "; ") + ".",  
+    state_actor_data: state_actor_data,  
+    conflict_details: conflict_details  
+}} AS RULAC_research
+
+
+
+
+## Example 7a (Ranking least global country conflict involvement + by european union)
+Research Question: "Which European Union countries have been party to the fewest conflicts?"
+Generated Query:
+WITH [
+    "040", "056", "100", "191", "196", "203", "208", "233", 
+    "246", "250", "276", "300", "348", "372", "380", "428", 
+    "440", "442", "470", "528", "616", "620", "642", "703", 
+    "705", "724", "752"
+] AS european_union_member_codes
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)
+WHERE sa.UN_M49Code IN european_union_member_codes
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    sa.name AS country_name,
+    c,
+    ct,
+    COLLECT(DISTINCT {{
+        name: actor.name,
+        labels: labels(actor),
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH 
+    country_name,
+    COUNT(DISTINCT c) AS total_conflicts,
+    COLLECT(DISTINCT c.name) AS conflict_names,
+    COLLECT({{
+        conflict_name: c.name,
+        conflict_classification: ct.type,
+        conflict_overview: c.overview,
+        applicable_ihl_law: c.applicable_law,
+        conflict_citation: c.citation,
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+    }}) AS conflict_details
+ORDER BY total_conflicts ASC
+LIMIT 10
+WITH 
+    COLLECT({{
+        country_name: country_name,
+        total_conflicts: total_conflicts,
+        conflict_names: conflict_names
+    }}) AS country_conflict_data,
+    REDUCE(all_details = [], conflict_list IN COLLECT(conflict_details) | all_details + conflict_list) AS conflict_details
+WITH 
+    country_conflict_data,
+    conflict_details,
+    [entry IN country_conflict_data | entry.country_name + " with " + toString(entry.total_conflicts) + " conflicts (" + apoc.text.join(entry.conflict_names, ", ") + ")"] AS summary_list
+RETURN {{
+    summary: "According to RULAC, the top 10 European Union countries that have been party to the fewest conflicts are: " + apoc.text.join(summary_list, "; ") + ".",
+    country_conflict_data: country_conflict_data,
+    conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Example 7a2 (Ranking most global regional conflict involvement)
+Research Question: "which middle eastern countries have been involved in the most conflicts?"
+Generated Query:
+MATCH (sa:StateActor)-[:BELONGS_TO]->(gr:GeoRegion {{UN_M49Code: "145"}}) // Middle East
+OPTIONAL MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa)
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH 
+    sa.name AS country_name,
+    sa.UN_M49Code AS country_UN_M49Code,
+    c,
+    ct,
+    COLLECT(DISTINCT actor) AS all_actors
+
+WITH 
+    country_name,
+    country_UN_M49Code,
+    COUNT(DISTINCT c) AS total_conflicts,
+    COLLECT(DISTINCT c.name) AS conflict_names,
+    COLLECT({{ 
+        conflict_name: COALESCE(c.name, "Unknown"),
+        conflict_classification: COALESCE(ct.type, "Unclassified"),
+        conflict_overview: COALESCE(c.overview, "No Overview Available"),
+        applicable_ihl_law: COALESCE(c.applicable_law, "Not Specified"),
+        conflict_citation: COALESCE(c.citation, "No Citation Available"),
+        state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "StateActor" IN labels(p)]) = 0 
+            THEN "No state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "StateActor" IN labels(p) | p.name], ", ") 
+        END,
+        non_state_parties: CASE 
+            WHEN all_actors IS NULL OR size([p IN all_actors WHERE "NonStateActor" IN labels(p)]) = 0 
+            THEN "No non-state actors recorded" 
+            ELSE apoc.text.join([p IN all_actors WHERE "NonStateActor" IN labels(p) | p.name], ", ") 
+        END
+    }}) AS conflict_details
+
+ORDER BY total_conflicts DESC
+
+WITH 
+    COLLECT({{ 
+        country_name: country_name,
+        country_UN_M49Code: country_UN_M49Code,
+        total_conflicts: total_conflicts,
+        conflict_names: conflict_names,
+        conflict_details: conflict_details
+    }}) AS country_conflict_summary
+
+WITH 
+    country_conflict_summary,
+    apoc.coll.flatten([c IN country_conflict_summary | c.conflict_details]) AS conflict_details
+
+RETURN {{ 
+    summary: "According to RULAC, the Middle Eastern countries involved in the most conflicts are: " +
+        apoc.text.join([c IN country_conflict_summary | c.country_name + " with " + toString(c.total_conflicts) + " conflicts: " + apoc.text.join(c.conflict_names, ", ")], "; "),
+    conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+## Example (Sahel region that spans several geographical regions, also an example of how to return default data in case of no matches)
+Research Question: "How many IACS are happening in the Sahel Region"?
+Generated Query:
+WITH ["International Armed Conflict (IAC)"] AS classifications  
+
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(country:Country)
+WHERE country.UN_M49Code IN [["466", "562", "768", "148", "478"]]  // Define Sahel countries: Mali, Niger, Burkina Faso, Chad, Mauritania
+
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH  
+    "the Sahel region" AS region_name,  
+    classifications AS conflict_types,  
+    COALESCE(ct.type, "Unclassified") AS conflict_classification,  
+    COALESCE(c.name, "No conflict recorded") AS conflict_name,  
+    COALESCE(c.overview, "No overview available") AS conflict_overview,  
+    COALESCE(c.applicable_law, "No applicable law recorded") AS applicable_ihl_law,  
+    COALESCE(c.citation, "No citation available") AS conflict_citation,  
+    COLLECT(DISTINCT {{  
+        name: COALESCE(actor.name, "Unknown"),  
+        labels: labels(actor),  
+        relationship_type: COALESCE(type(r), "Unknown relationship")  
+    }}) AS conflict_parties  
+
+WITH  
+    region_name,  
+    conflict_types,  
+    COUNT(DISTINCT CASE WHEN conflict_classification = "International Armed Conflict (IAC)" THEN conflict_name END) AS total_IACs,
+    COUNT(DISTINCT conflict_name) AS total_conflicts,
+    COLLECT({{  
+        conflict_name: conflict_name,  
+        conflict_classification: conflict_classification,  
+        conflict_overview: conflict_overview,  
+        applicable_ihl_law: applicable_ihl_law,  
+        conflict_citation: conflict_citation,  
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+    }}) AS conflict_details  
+
+WITH 
+    region_name,
+    conflict_types,
+    total_conflicts,
+    total_IACs,
+    conflict_details,
+    CASE 
+        WHEN total_IACs = 0 THEN 
+            "According to RULAC, there are currently no International Armed Conflicts (IACs) recorded as taking place in " + region_name + "."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_IACs) +  
+            " International Armed Conflicts (IACs) taking place in " + region_name + "."
+    END AS summary_text
+
+RETURN {{  
+    summary: summary_text,  
+    conflict_details: conflict_details  
+}} AS RULAC_research
+
+
+
+
+
+## Example 9.
+Research Question: "How do conflicts involving G7 countries compare in number to those involving BRICS countries?"
+Generated Query:
+// Define the list of UN M49 Codes for G7 and BRICS countries
+WITH [
+    "124", "250", "276", "380", "392", "826", "840"  // G7 countries: Canada (124), France (250), Germany (276), Italy (380), Japan (392), United Kingdom (826), USA (840)
+] AS g7_codes,
+[
+    "076", "643", "356", "156", "710", "818", "231", "360", "364", "784"  // BRICS countries: Brazil (076), Russia (643), India (356), China (156), South Africa (710), Egypt (818), Ethiopia (231), Indonesia (360), Iran (364), United Arab Emirates (784)
+] AS brics_codes
+
+// Match conflicts involving G7 or BRICS countries
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)
+WHERE sa.UN_M49Code IN g7_codes OR sa.UN_M49Code IN brics_codes
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+// Assign group_name based on UN M49 Code
+WITH
+  CASE 
+    WHEN sa.UN_M49Code IN g7_codes THEN "G7"
+    WHEN sa.UN_M49Code IN brics_codes THEN "BRICS"
+  END AS group_name,
+  c,
+  ct,
+  COLLECT(
+    DISTINCT {{
+      name: actor.name,
+      labels: labels(actor),
+      relationship_type: type(r)
+    }}
+  ) AS conflict_parties
+
+// Create conflict_detail map
+WITH
+  group_name,
+  {{
+    conflict_name: c.name,
+    conflict_classification: ct.type,
+    conflict_overview: c.overview,
+    applicable_ihl_law: c.applicable_law,
+    conflict_citation: c.citation,
+    state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+    non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+  }} AS conflict_detail
+
+// Aggregate distinct conflicts per group
+WITH
+  group_name,
+  COLLECT(DISTINCT conflict_detail) AS conflicts_per_group
+
+// Calculate total conflicts per group
+WITH
+  group_name,
+  conflicts_per_group,
+  size(conflicts_per_group) AS total_conflicts,
+  [conflict IN conflicts_per_group | conflict.conflict_name] AS conflict_names
+
+// Prepare summary data
+WITH
+  group_name,
+  total_conflicts,
+  conflict_names,
+  conflicts_per_group
+
+// Collect group_conflict_summary ensuring unique entries per group
+WITH
+  COLLECT({{
+    group_name: group_name,
+    total_conflicts: total_conflicts,
+    conflict_names: conflict_names,
+    conflicts_per_group: conflicts_per_group
+  }}) AS group_conflict_summary
+
+// Determine the maximum number of conflicts
+WITH
+  group_conflict_summary,
+  apoc.coll.max([g IN group_conflict_summary | g.total_conflicts]) AS max_conflicts
+
+// Collect all groups with the maximum number of conflicts (to handle ties)
+WITH
+  group_conflict_summary,
+  max_conflicts,
+  [g IN group_conflict_summary WHERE g.total_conflicts = max_conflicts] AS most_conflicted_groups,
+  apoc.coll.flatten([
+    group IN group_conflict_summary | 
+    group.group_name + " includes state actor involvement in " + 
+    toString(group.total_conflicts) + " conflict(s): " + 
+    apoc.text.join(apoc.coll.toSet(group.conflict_names), ", ")
+  ]) AS breakdown,
+  apoc.coll.flatten([group IN group_conflict_summary | group.conflicts_per_group]) AS conflict_details
+
+// Assign the summary text using a separate WITH clause
+WITH
+  group_conflict_summary,
+  max_conflicts,
+  most_conflicted_groups,
+  breakdown,
+  conflict_details,
+  CASE 
+    WHEN size(most_conflicted_groups) = 1 THEN 
+      "According to RULAC, the group with the most state actor involvement in armed conflicts is " + 
+      most_conflicted_groups[0].group_name + 
+      ", with state actors engaged in " + toString(max_conflicts) + " total conflicts."
+    ELSE 
+      "According to RULAC, " + 
+      apoc.text.join([g IN most_conflicted_groups | g.group_name], " and ") + 
+      " groups are equally involved in " + 
+      toString(max_conflicts) + " total conflicts."
+  END AS summary_text
+
+RETURN {{
+  summary: summary_text + " Breakdown by group: " + 
+            apoc.text.join(breakdown, "; "),
+  conflict_details: conflict_details
+}} AS RULAC_research
+
+
+
+
+
+Example 10. (Conflict counts by classification type)
+Research Question: "How many conflicts are classified as occupations and/or IACs?" 
+Generated Query:
+WITH ["International Armed Conflict (IAC)", "Military Occupation"] AS conflict_classification
+
+OPTIONAL MATCH (c:Conflict)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+WHERE ct.type = conflict_classification
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+WITH  
+    conflict_classification,  
+    COALESCE(c.name, {{ "No conflict recorded" }}) AS conflict_name,  
+    COALESCE(c.overview, {{ "No overview available" }}) AS conflict_overview,  
+    COALESCE(c.applicable_law, {{ "No applicable law recorded" }}) AS applicable_ihl_law,  
+    COALESCE(c.citation, {{ "No citation available" }}) AS conflict_citation,  
+    COLLECT(DISTINCT {{  
+        name: COALESCE(actor.name, {{ "Unknown" }}),  
+        labels: labels(actor),  
+        relationship_type: COALESCE(type(r), {{ "Unknown relationship" }})  
+    }}) AS conflict_parties  
+
+WITH  
+    conflict_classification,  
+    COUNT(DISTINCT CASE WHEN conflict_name <> {{ "No conflict recorded" }} THEN conflict_name END) AS total_conflicts,
+    COLLECT(DISTINCT conflict_name) AS conflict_names,
+    COLLECT(CASE 
+        WHEN conflict_name <> {{ "No conflict recorded" }} THEN {{
+            conflict_name: conflict_name,  
+            conflict_classification: conflict_classification,  
+            conflict_overview: conflict_overview,  
+            applicable_ihl_law: applicable_ihl_law,  
+            conflict_citation: conflict_citation,  
+            state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+            non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+        }}
+        ELSE NULL
+    END) AS conflict_details  
+
+WITH 
+    conflict_classification,
+    total_conflicts,
+    [x IN conflict_details WHERE x IS NOT NULL] AS filtered_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            {{ "According to RULAC, there are currently no recorded armed conflicts classified as '" }} + conflict_classification + {{ "'." }}
+        ELSE 
+            {{ "According to RULAC, there are currently " }} + toString(total_conflicts) +  
+            {{ " total distinct armed conflicts classified as '" }} + conflict_classification + {{ "'. Conflicts: " }} +  
+            apoc.text.join(conflict_names, {{ ", " }})
+    END AS summary_text
+
+RETURN {{  
+    summary: summary_text,  
+    conflict_details: filtered_conflict_details  
+}} AS RULAC_research
+
+
+
+
+Example 11. (conflict details by conflict type and region)
+Research Question: "How many NIACs are taking place in Africa?"
+Generated Query:
+WITH ["Non-International Armed Conflict (NIAC)"] AS classifications  
+
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(country:Country)-[:BELONGS_TO]->(region:GeoRegion {{UN_M49Code: "002"}}) // Africa  
+MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)  
+WHERE ct.type IN classifications  
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)  
+
+WITH  
+    classifications,  
+    region.name AS region_name,  
+    ct.type AS conflict_classification,  
+    c.name AS conflict_name,  
+    c.overview AS conflict_overview,  
+    c.applicable_law AS applicable_ihl_law,  
+    c.citation AS conflict_citation,  
+    COLLECT(DISTINCT {{  
+        name: actor.name,  
+        labels: labels(actor),  
+        relationship_type: type(r)  
+    }}) AS conflict_parties  
+
+WITH  
+    classifications,  
+    region_name,  
+    conflict_classification,  
+    {{  
+        conflict_name: conflict_name,  
+        conflict_classification: conflict_classification,  
+        conflict_overview: conflict_overview,  
+        applicable_ihl_law: applicable_ihl_law,  
+        conflict_citation: conflict_citation,  
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+    }} AS conflict_detail  
+
+WITH  
+    classifications,  
+    region_name,  
+    conflict_classification,  
+    COUNT(DISTINCT conflict_detail.conflict_name) AS total_conflicts_per_type,  
+    COLLECT(conflict_detail) AS conflict_details,  
+    COLLECT(DISTINCT conflict_detail.conflict_name) AS conflict_names  
+
+WITH  
+    classifications,  
+    region_name,
+    conflict_classification,    
+    COLLECT({{  
+        conflict_classification: conflict_classification,  
+        total_conflicts: total_conflicts_per_type,  
+        conflict_names: conflict_names  
+    }}) AS conflict_breakdown,  
+    REDUCE(all_details = [], details IN COLLECT(conflict_details) | all_details + details) AS all_conflict_details  
+
+WITH  
+    classifications,  
+    region_name,
+    conflict_classification,      
+    conflict_breakdown,  
+    all_conflict_details,  
+    SIZE(apoc.coll.toSet([conflict IN all_conflict_details | conflict.conflict_name])) AS total_conflicts  
+
+RETURN {{  
+    summary: "According to RULAC, there are " + toString(total_conflicts) +  
+             " total distinct armed conflicts classified as " +  
+             apoc.text.join(classifications, " or ") +  
+             " taking place in " + region_name + ". Breakdown: " +  
+             apoc.text.join([b IN conflict_breakdown |  
+                 b.conflict_classification + " (" + toString(b.total_conflicts) + "): " +  
+                 apoc.text.join(b.conflict_names, ", ")  
+             ], "; "),  
+    conflict_details: all_conflict_details  
+}} AS RULAC_research
+
+
+
+
+
+Example 11B. (conflict details by conflict type and region)
+Research Question: "Which NIACS involve non-state actors in Africa?"
+Generated Query:
+WITH ["Non-International Armed Conflict (NIAC)"] AS classifications  
+
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(country:Country)-[:BELONGS_TO]->(region:GeoRegion {{UN_M49Code: "002"}}) // Africa  
+MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)  
+WHERE ct.type IN classifications  
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)  
+
+WITH  
+    classifications,  
+    region.name AS region_name,  
+    ct.type AS conflict_classification,  
+    c.name AS conflict_name,  
+    c.overview AS conflict_overview,  
+    c.applicable_law AS applicable_ihl_law,  
+    c.citation AS conflict_citation,  
+    COLLECT(DISTINCT {{  
+        name: actor.name,  
+        labels: labels(actor),  
+        relationship_type: type(r)  
+    }}) AS conflict_parties  
+
+WITH  
+    classifications,  
+    region_name,  
+    conflict_classification,  
+    {{  
+        conflict_name: conflict_name,  
+        conflict_classification: conflict_classification,  
+        conflict_overview: conflict_overview,  
+        applicable_ihl_law: applicable_ihl_law,  
+        conflict_citation: conflict_citation,  
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+    }} AS conflict_detail  
+
+WITH  
+    classifications,  
+    region_name,  
+    conflict_classification,  
+    COUNT(DISTINCT conflict_detail.conflict_name) AS total_conflicts_per_type,  
+    COLLECT(conflict_detail) AS conflict_details,  
+    COLLECT(DISTINCT conflict_detail.conflict_name) AS conflict_names  
+
+WITH  
+    classifications,  
+    region_name,
+    conflict_classification,    
+    COLLECT({{  
+        conflict_classification: conflict_classification,  
+        total_conflicts: total_conflicts_per_type,  
+        conflict_names: conflict_names  
+    }}) AS conflict_breakdown,  
+    REDUCE(all_details = [], details IN COLLECT(conflict_details) | all_details + details) AS all_conflict_details  
+
+WITH  
+    classifications,  
+    region_name,
+    conflict_classification,      
+    conflict_breakdown,  
+    all_conflict_details,  
+    SIZE(apoc.coll.toSet([conflict IN all_conflict_details | conflict.conflict_name])) AS total_conflicts  
+
+RETURN {{  
+    summary: "According to RULAC, there are " + toString(total_conflicts) +  
+             " total distinct armed conflicts classified as " +  
+             apoc.text.join(classifications, " or ") +  
+             " taking place in " + region_name + ". Breakdown: " +  
+             apoc.text.join([b IN conflict_breakdown |  
+                 b.conflict_classification + " (" + toString(b.total_conflicts) + "): " +  
+                 apoc.text.join(b.conflict_names, ", ")  
+             ], "; "),  
+    conflict_details: all_conflict_details  
+}} AS RULAC_research
+
+
+
+Example 12. (conflict details by conflict type and taking place in geographical location, e.g. region)
+Research Question: "How many IACs or occupations are taking place in Europe?"
+Generated Query:
+WITH ["International Armed Conflict (IAC)", "Military Occupation"] AS classifications  
+
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(country:Country)-[:BELONGS_TO]->(region:GeoRegion {{UN_M49Code: "150"}}) // Europe  
+MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)  
+WHERE ct.type IN classifications  
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)  
+
+WITH  
+    classifications,  
+    region.name AS region_name,  
+    ct.type AS conflict_classification,  
+    c.name AS conflict_name,  
+    c.overview AS conflict_overview,  
+    c.applicable_law AS applicable_ihl_law,  
+    c.citation AS conflict_citation,  
+    COLLECT(DISTINCT {{  
+        name: actor.name,  
+        labels: labels(actor),  
+        relationship_type: type(r)  
+    }}) AS conflict_parties  
+
+WITH  
+    classifications,  
+    region_name,  
+    conflict_classification,  
+    {{  
+        conflict_name: conflict_name,  
+        conflict_classification: conflict_classification,  
+        conflict_overview: conflict_overview,  
+        applicable_ihl_law: applicable_ihl_law,  
+        conflict_citation: conflict_citation,  
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+    }} AS conflict_detail  
+
+WITH  
+    classifications,  
+    region_name,  
+    conflict_classification,  
+    COUNT(DISTINCT conflict_detail.conflict_name) AS total_conflicts_per_type,  
+    COLLECT(conflict_detail) AS conflict_details,  
+    COLLECT(DISTINCT conflict_detail.conflict_name) AS conflict_names  
+
+WITH  
+    classifications,  
+    region_name,
+    conflict_classification,
+    COLLECT({{  
+        conflict_classification: conflict_classification,  
+        total_conflicts: total_conflicts_per_type,  
+        conflict_names: conflict_names  
+    }}) AS conflict_breakdown,  
+    REDUCE(all_details = [], details IN COLLECT(conflict_details) | all_details + details) AS all_conflict_details  
+
+WITH  
+    classifications,  
+    region_name,
+    conflict_classification,  
+    conflict_breakdown,  
+    all_conflict_details,  
+    SIZE(apoc.coll.toSet([conflict IN all_conflict_details | conflict.conflict_name])) AS total_conflicts  
+
+RETURN {{  
+    summary: "According to RULAC, there are " + toString(total_conflicts) +  
+             " total distinct armed conflicts classified as " +  
+             apoc.text.join(classifications, " or ") +  
+             " taking place in " + region_name + ". Breakdown: " +  
+             apoc.text.join([b IN conflict_breakdown |  
+                 b.conflict_classification + " (" + toString(b.total_conflicts) + "): " +  
+                 apoc.text.join(b.conflict_names, ", ")  
+             ], "; "),  
+    conflict_details: all_conflict_details  
+}} AS RULAC_research
+
+
+
+
+Example 12. (conflict lookup by non-state actor, and default data shape if no results)
+Research Question: "What conflicts involve Wagner Group as a non-state actor?"
+Generated Query:
+WITH "Wagner Group" AS actor_name
+
+OPTIONAL MATCH (c:Conflict)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WHERE toLower(actor.name) CONTAINS toLower(actor_name)
+   OR any(alias IN actor.aliases WHERE toLower(alias) CONTAINS toLower(actor_name))
+
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r2:IS_PARTY_TO_CONFLICT]-(all_parties)
+
+WITH  
+    actor_name,  
+    COALESCE(ct.type, "Unclassified") AS conflict_classification,  
+    COALESCE(c.name, "No conflict recorded") AS conflict_name,  
+    COALESCE(c.overview, "No overview available") AS conflict_overview,  
+    COALESCE(c.applicable_law, "No applicable law recorded") AS applicable_ihl_law,  
+    COALESCE(c.citation, "No citation available") AS conflict_citation,  
+    COLLECT(DISTINCT {{  
+        name: COALESCE(all_parties.name, "Unknown"),  
+        labels: labels(all_parties),  
+        relationship_type: COALESCE(type(r2), "Unknown relationship")  
+    }}) AS conflict_parties  
+
+WITH  
+    actor_name,  
+    COUNT(DISTINCT CASE WHEN conflict_name <> "No conflict recorded" THEN conflict_name END) AS total_conflicts,
+    COLLECT(DISTINCT conflict_name) AS conflict_names,
+    COLLECT(CASE 
+        WHEN conflict_name <> "No conflict recorded" THEN {{
+            conflict_name: conflict_name,  
+            conflict_classification: conflict_classification,  
+            conflict_overview: conflict_overview,  
+            applicable_ihl_law: applicable_ihl_law,  
+            conflict_citation: conflict_citation,  
+            state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+            non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+        }}
+        ELSE NULL
+    END) AS conflict_details  
+
+WITH 
+    actor_name,
+    total_conflicts,
+    [x IN conflict_details WHERE x IS NOT NULL] AS filtered_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            "According to RULAC, there are currently no recorded armed conflicts involving '" + actor_name + "'."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_conflicts) +  
+            " total distinct armed conflicts involving '" + actor_name + "'. Conflicts: " +  
+            apoc.text.join(conflict_names, ", ")
+    END AS summary_text
+
+RETURN {{  
+    summary: summary_text,  
+    conflict_details: filtered_conflict_details  
+}} AS RULAC_research
+
+
+
+
+Example 12b. (conflict lookup by party, and default data shape if no results)
+Research Question: "What conflicts involve ISIS as a party?"
+Generated Query:
+WITH "ISIS" AS actor_name
+
+OPTIONAL MATCH (c:Conflict)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WHERE toLower(actor.name) CONTAINS toLower(actor_name)
+   OR any(alias IN actor.aliases WHERE toLower(alias) CONTAINS toLower(actor_name))
+
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r2:IS_PARTY_TO_CONFLICT]-(all_parties)
+
+WITH  
+    actor_name,  
+    COALESCE(ct.type, "Unclassified") AS conflict_classification,  
+    COALESCE(c.name, "No conflict recorded") AS conflict_name,  
+    COALESCE(c.overview, "No overview available") AS conflict_overview,  
+    COALESCE(c.applicable_law, "No applicable law recorded") AS applicable_ihl_law,  
+    COALESCE(c.citation, "No citation available") AS conflict_citation,  
+    COLLECT(DISTINCT {{  
+        name: COALESCE(all_parties.name, "Unknown"),  
+        labels: labels(all_parties),  
+        relationship_type: COALESCE(type(r2), "Unknown relationship")  
+    }}) AS conflict_parties  
+
+WITH  
+    actor_name,  
+    COUNT(DISTINCT CASE WHEN conflict_name <> "No conflict recorded" THEN conflict_name END) AS total_conflicts,
+    COLLECT(DISTINCT conflict_name) AS conflict_names,
+    COLLECT(CASE 
+        WHEN conflict_name <> "No conflict recorded" THEN {{
+            conflict_name: conflict_name,  
+            conflict_classification: conflict_classification,  
+            conflict_overview: conflict_overview,  
+            applicable_ihl_law: applicable_ihl_law,  
+            conflict_citation: conflict_citation,  
+            state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),  
+            non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")  
+        }}
+        ELSE NULL
+    END) AS conflict_details  
+
+WITH 
+    actor_name,
+    total_conflicts,
+    [x IN conflict_details WHERE x IS NOT NULL] AS filtered_conflict_details,
+    CASE 
+        WHEN total_conflicts = 0 THEN 
+            "According to RULAC, there are currently no recorded armed conflicts involving '" + actor_name + "'."
+        ELSE 
+            "According to RULAC, there are currently " + toString(total_conflicts) +  
+            " total distinct armed conflicts involving '" + actor_name + "'. Conflicts: " +  
+            apoc.text.join(conflict_names, ", ")
+    END AS summary_text
+
+RETURN {{  
+    summary: summary_text,  
+    conflict_details: filtered_conflict_details  
+}} AS RULAC_research
+
+
+
+Example 14.(Conflict lookup by type of actor and/or geographic location of conflict, e.g country)
+Research Question: "Which non-state actors are involved in the Syrian Civil War?"
+Generated Query:
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]-(co:Country {{UN_M49Code: "760"}})
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    classifications,
+    region.name AS region_name,
+    ct.type AS conflict_classification,
+    c.name AS conflict_name,
+    c.overview AS conflict_overview,
+    c.applicable_law AS applicable_ihl_law,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name,
+        labels: labels(actor),
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH
+    classifications,
+    region_name,
+    conflict_classification,
+    {{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        applicable_ihl_law: applicable_ihl_law,
+        conflict_citation: conflict_citation,
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+    }} AS conflict_detail
+WITH
+    classifications,
+    region_name,
+    conflict_classification,
+    COUNT(DISTINCT conflict_detail) AS total_conflicts_per_type,
+    COLLECT(conflict_detail) AS conflict_details,
+    COLLECT(DISTINCT conflict_detail.conflict_name) AS conflict_names
+WITH
+    classifications,
+    conflict_classification,
+    region_name,
+    COLLECT({{
+        conflict_classification: conflict_classification,
+        total_conflicts: total_conflicts_per_type,
+        conflict_names: conflict_names
+    }}) AS conflict_breakdown,
+    REDUCE(all_details = [], details IN COLLECT(conflict_details) | all_details + details) AS all_conflict_details,
+    SUM(total_conflicts_per_type) AS total_conflicts
+RETURN {{
+    summary: "According to RULAC, there are " + toString(total_conflicts) + 
+             " total distinct armed conflicts classified as " + 
+             apoc.text.join(classifications, " or ") + " taking place in " + region_name + ". Breakdown: " +
+             apoc.text.join([b IN conflict_breakdown | b.conflict_classification + " (" + toString(b.total_conflicts) + "): " + apoc.text.join(b.conflict_names, ", ")], "; "),
+    conflict_details: all_conflict_details
+}} AS RULAC_research
+
+
+
+Example 15. (Global conflict details by conflict type and taking place in world, reporting by region)
+Research Question: "Where are IACs taking place in the world?"
+Generated Query:
+WITH ["International Armed Conflict (IAC)"] AS classifications
+MATCH (c:Conflict)-[:IS_TAKING_PLACE_IN_COUNTRY]->(:Country)-[:BELONGS_TO]->(region:GeoRegion {{UN_M49Code: "001"}}) // World
+MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+WHERE ct.type IN classifications
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH 
+    classifications,
+    region.name AS region_name,
+    ct.type AS conflict_classification,
+    c.name AS conflict_name,
+    c.overview AS conflict_overview,
+    c.applicable_law AS applicable_ihl_law,
+    c.citation AS conflict_citation,
+    COLLECT(DISTINCT {{
+        name: actor.name,
+        labels: labels(actor),
+        relationship_type: type(r)
+    }}) AS conflict_parties
+WITH
+    classifications,
+    region_name,
+    conflict_classification,
+    {{
+        conflict_name: conflict_name,
+        conflict_classification: conflict_classification,
+        conflict_overview: conflict_overview,
+        applicable_ihl_law: applicable_ihl_law,
+        conflict_citation: conflict_citation,
+        state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+        non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+    }} AS conflict_detail
+WITH
+    classifications,
+    region_name,
+    conflict_classification,
+    COUNT(DISTINCT conflict_detail) AS total_conflicts_per_type,
+    COLLECT(conflict_detail) AS conflict_details,
+    COLLECT(DISTINCT conflict_detail.conflict_name) AS conflict_names
+WITH
+    classifications,
+    conflict_classification,
+    region_name,
+    COLLECT({{
+        conflict_classification: conflict_classification,
+        total_conflicts: total_conflicts_per_type,
+        conflict_names: conflict_names
+    }}) AS conflict_breakdown,
+    REDUCE(all_details = [], details IN COLLECT(conflict_details) | all_details + details) AS all_conflict_details,
+    SUM(total_conflicts_per_type) AS total_conflicts
+RETURN {{
+    summary: "According to RULAC, there are " + toString(total_conflicts) + 
+             " total distinct armed conflicts classified as " + 
+             apoc.text.join(classifications, " or ") + " taking place in " + region_name + ". Breakdown: " +
+             apoc.text.join([b IN conflict_breakdown | b.conflict_classification + " (" + toString(b.total_conflicts) + "): " + apoc.text.join(b.conflict_names, ", ")], "; "),
+    conflict_details: all_conflict_details
+}} AS RULAC_research
+
+
+
+
+
+
+
+
+
+
+Example 14.
+Research Question: "Is Syria involved in more conflicts than its neighboring countries?"
+Generated Query:
+// Define the list of UN M49 Codes for Syria and its neighboring countries
+WITH [
+    "760", // Syria
+    "400", // Jordan
+    "376", // Lebanon
+    "792", // Turkey
+    "368", // Iraq
+    "376"  // Israel
+] AS country_codes
+
+// Match conflicts involving Syria and its neighboring countries
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)
+WHERE sa.UN_M49Code IN country_codes
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+WITH
+  sa.name AS country_name,
+  sa.UN_M49Code AS country_UN_M49Code,
+  c,
+  ct,
+  COLLECT(
+    DISTINCT {{
+      name: actor.name,
+      labels: labels(actor),
+      relationship_type: type(r)
+    }}
+  ) AS conflict_parties
+WITH
+  country_name,
+  country_UN_M49Code,
+  {{
+    conflict_name: c.name,
+    conflict_classification: ct.type,
+    conflict_overview: c.overview,
+    applicable_ihl_law: c.applicable_law,
+    conflict_citation: c.citation,
+    state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+    non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+  }} AS conflict_detail
+WITH
+  country_name,
+  country_UN_M49Code,
+  COLLECT(conflict_detail) AS conflicts_per_country
+WITH
+  country_name,
+  country_UN_M49Code,
+  conflicts_per_country,
+  size(conflicts_per_country) AS total_conflicts
+WITH
+  COLLECT({{
+    country_name: country_name,
+    country_UN_M49Code: country_UN_M49Code,
+    total_conflicts: total_conflicts,
+    conflict_names: [conflict IN conflicts_per_country | conflict.conflict_name],
+    conflicts_per_country: conflicts_per_country
+  }}) AS country_conflict_summary
+WITH
+  country_conflict_summary,
+  apoc.coll.max([c IN country_conflict_summary | c.total_conflicts]) AS max_conflicts,
+  [c IN country_conflict_summary WHERE c.total_conflicts = apoc.coll.max([c IN country_conflict_summary | c.total_conflicts])] AS most_conflicted_countries,
+  apoc.coll.flatten([country IN country_conflict_summary | country.country_name + " (UN M49 code: " + country.country_UN_M49Code + ") is a state party to " + toString(country.total_conflicts) + " conflict(s): " + apoc.text.join(country.conflict_names, ", ")]) AS breakdown,
+  apoc.coll.flatten([conflict IN country_conflict_summary | conflict.conflicts_per_country]) AS conflict_details
+RETURN {{
+  summary: CASE
+    WHEN size(most_conflicted_countries) = 1 THEN
+      "According to RULAC, in a comparison between Syria and its neighboring countries, the country currently party to the most distinct armed conflicts is " + most_conflicted_countries[0].country_name + ", being a state party to " + toString(max_conflicts) + " total distinct conflicts. Breakdown by country: " + apoc.text.join(breakdown, "; ")
+    ELSE
+      "According to RULAC, in a comparison between Syria and its neighboring countries, both Syria and its neighboring countries are equally party to " + toString(max_conflicts) + " total distinct conflicts. Breakdown by country: " + apoc.text.join(breakdown, "; ")
+  END,
+  conflict_details: conflict_details
+}} AS RULAC_research
+
+
+Example 15.
+Research Question: "how would you compare conflicts involving African Union and European Union member states?"
+Generated Query:
+// Define the list of UN M49 Codes for African Union and European Union member states
+WITH [
+    "108", "120", "140", "148", "178", "180", "226", "266", "678",  // Central Africa
+    "174", "262", "232", "231", "404", "450", "480", "646", "690", "706", "728", "729", "834", "800",  // Eastern Africa
+    "012", "818", "434", "478", "504", "732", "788",  // Northern Africa
+    "024", "072", "748", "426", "454", "508", "516", "710", "894", "716",  // Southern Africa
+    "204", "854", "132", "384", "270", "288", "324", "624", "430", "466", "562", "566", "686", "694", "768"  // Western Africa
+] AS african_union_member_codes,
+[
+    "040", "056", "100", "191", "196", "203", "208", "233", 
+    "246", "250", "276", "300", "348", "372", "380", "428", 
+    "440", "442", "470", "528", "616", "620", "642", "703", 
+    "705", "724", "752"
+] AS european_union_member_codes
+
+// Match conflicts involving AU or EU member states
+MATCH (c:Conflict)-[:IS_PARTY_TO_CONFLICT]-(sa:StateActor)
+WHERE sa.UN_M49Code IN african_union_member_codes OR sa.UN_M49Code IN european_union_member_codes
+OPTIONAL MATCH (c)-[:IS_CLASSIFIED_AS_CONFLICT_TYPE]->(ct:ConflictType)
+OPTIONAL MATCH (c)-[r:IS_PARTY_TO_CONFLICT]-(actor)
+
+// Assign group_name based on UN M49 Code
+WITH
+  CASE 
+    WHEN sa.UN_M49Code IN african_union_member_codes THEN "African Union"
+    WHEN sa.UN_M49Code IN european_union_member_codes THEN "European Union"
+  END AS group_name,
+  c,
+  ct,
+  COLLECT(
+    DISTINCT {{
+      name: actor.name,
+      labels: labels(actor),
+      relationship_type: type(r)
+    }}
+  ) AS conflict_parties
+
+// Create conflict_detail map
+WITH
+  group_name,
+  {{
+    conflict_name: c.name,
+    conflict_classification: ct.type,
+    conflict_overview: c.overview,
+    applicable_ihl_law: c.applicable_law,
+    conflict_citation: c.citation,
+    state_parties: apoc.text.join([p IN conflict_parties WHERE "StateActor" IN p.labels | p.name], ", "),
+    non_state_parties: apoc.text.join([p IN conflict_parties WHERE "NonStateActor" IN p.labels | p.name], ", ")
+  }} AS conflict_detail
+
+// Aggregate distinct conflicts per group
+WITH
+  group_name,
+  COLLECT(DISTINCT conflict_detail) AS conflicts_per_group
+
+// Calculate total conflicts per group
+WITH
+  group_name,
+  conflicts_per_group,
+  size(conflicts_per_group) AS total_conflicts,
+  [conflict IN conflicts_per_group | conflict.conflict_name] AS conflict_names
+
+// Prepare summary data
+WITH
+  group_name,
+  total_conflicts,
+  conflict_names,
+  conflicts_per_group
+
+// Collect group_conflict_summary ensuring unique entries per group
+WITH
+  COLLECT({{
+    group_name: group_name,
+    total_conflicts: total_conflicts,
+    conflict_names: conflict_names,
+    conflicts_per_group: conflicts_per_group
+  }}) AS group_conflict_summary
+
+// Determine the maximum number of conflicts
+WITH
+  group_conflict_summary,
+  apoc.coll.max([g IN group_conflict_summary | g.total_conflicts]) AS max_conflicts
+
+// Collect all groups with the maximum number of conflicts (to handle ties)
+WITH
+  group_conflict_summary,
+  max_conflicts,
+  [g IN group_conflict_summary WHERE g.total_conflicts = max_conflicts] AS most_conflicted_groups,
+  apoc.coll.flatten([
+    group IN group_conflict_summary | 
+    group.group_name + " includes state actor involvement in " + 
+    toString(group.total_conflicts) + " conflict(s): " + 
+    apoc.text.join(apoc.coll.toSet(group.conflict_names), ", ")
+  ]) AS breakdown,
+  apoc.coll.flatten([group IN group_conflict_summary | group.conflicts_per_group]) AS conflict_details
+
+// Assign the summary text using a separate WITH clause
+WITH
+  group_conflict_summary,
+  max_conflicts,
+  most_conflicted_groups,
+  breakdown,
+  conflict_details,
+  CASE 
+    WHEN size(most_conflicted_groups) = 1 THEN 
+      "According to RULAC, the group with the most state actor involvement in armed conflicts is " + 
+      most_conflicted_groups[0].group_name + 
+      ", with state actors engaged in " + toString(max_conflicts) + " total conflicts."
+    ELSE 
+      "According to RULAC, " + 
+      apoc.text.join([g IN most_conflicted_groups | g.group_name], " and ") + 
+      " groups are equally involved in " + 
+      toString(max_conflicts) + " total conflicts."
+  END AS summary_text
+
+RETURN {{
+  summary: summary_text + " Breakdown by group: " + 
+            apoc.text.join(breakdown, "; "),
+  conflict_details: conflict_details
+}} AS RULAC_research
+
+
+# Here is your research question:
+{question}
+
+Remember, your task is to return a cypher query. Do not add line breaks or new lines like /n Only provide the cypher query and nothing else. Do not start with the word "cypher"

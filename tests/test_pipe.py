@@ -7,6 +7,7 @@ import pytest
 from rich.console import Console
 from pipelines.beacon_openwebui_function_01_2025 import Pipe
 from rich.markdown import Markdown
+import os 
 
 console = Console()
 
@@ -18,7 +19,7 @@ test_scenarios = {
         "messages": [
             {"role": "system", "content": "You are an AI assistant."},
             {"role": "assistant", "content": "Hello! How can I help you?"},
-            {"role": "user", "content": "I'm curious about the conflict in Somalia."},
+            {"role": "user", "content": "I'm curious about the conflict in Lebanon. Could you tell me more about it?"},
             {
                 "role": "assistant",
                 "content": "Sure! Are you interested in classification or specific details?",
@@ -29,11 +30,11 @@ test_scenarios = {
             },
         ],
     },
-    "scenario_single_user_message1": {
-        "messages": [
-            {"role": "user", "content": "Could you write me a poem about dogs?"},
-        ],
-    },
+    # "scenario_single_user_message1": {
+    #     "messages": [
+    #         {"role": "user", "content": "Could you write me a poem about dogs?"},
+    #     ],
+    # },
     # "scenario_single_user_message2": {
     #     "messages": [
     #         {"role": "user", "content": "how many conflicts are found in west africa? "},
@@ -81,19 +82,16 @@ test_scenarios = {
     #         {"role": "user", "content": "How do I fix my phone screen?"},
     #     ],
     # },
-    #     # --------------- New / Expanded Scenarios ---------------
 
-    # "scenario_conflict_rulac_reference": {
-    #     "messages": [
-    #         {"role": "system", "content": "You are a classification and rewriting assistant."},
-    #         {"role": "assistant", "content": "Hi there, how can I help you?"},
-    #         {
-    #             "role": "user",
-    #             "content": "I want to see what RULAC says about the conflict in Syria.",
-    #         },
-    #     ],
-    #     # Since it's specifically about conflict, we expect a conflict-related classification
-    # },
+    "scenario_conflict_rulac_reference": {
+        "messages": [
+            {
+                "role": "user",
+                "content": "I want to see what RULAC says about the conflict in Syria.",
+            },
+        ],
+        # Since it's specifically about conflict, we expect a conflict-related classification
+    },
 
     # "scenario_conflict_israel_hamas": {
     #     "messages": [
@@ -205,28 +203,28 @@ test_scenarios = {
     # },
 
     # # 6) Retrieving IHL data for a specific conflict
-    # "scenario_conflict_ukraine_ihl": {
-    #     "messages": [
-    #         {"role": "system", "content": "You are a helpful assistant with knowledge of IHL."},
-    #         {"role": "assistant", "content": "Hello!"},
-    #         {
-    #             "role": "user",
-    #             "content": "How is the conflict in Ukraine classified and what IHL applies?",
-    #         },
-    #     ],
-    # },
+    "scenario_conflict_ukraine_ihl": {
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant with knowledge of IHL."},
+            {"role": "assistant", "content": "Hello!"},
+            {
+                "role": "user",
+                "content": "How is the conflict in Ukraine classified and what IHL applies?",
+            },
+        ],
+    },
 
     # # 7) Compare conflict data for multiple actors
-    # "scenario_compare_russia_usa_conflicts": {
-    #     "messages": [
-    #         {"role": "system", "content": "You are an AI assistant."},
-    #         {"role": "assistant", "content": "Hey there."},
-    #         {
-    #             "role": "user",
-    #             "content": "Are there more conflicts involving Russia or the United States as a state actor?",
-    #         },
-    #     ],
-    # },
+    "scenario_compare_russia_usa_conflicts": {
+        "messages": [
+            {"role": "system", "content": "You are an AI assistant."},
+            {"role": "assistant", "content": "Hey there."},
+            {
+                "role": "user",
+                "content": "Are there more conflicts involving Russia or the United States as a state actor?",
+            },
+        ],
+    },
 
     # # 8) Retrieving conflicts by classification (e.g., NIAC)
     # "scenario_conflicts_classified_as_niac": {
@@ -335,6 +333,10 @@ async def test_pipe_scenarios():
     async def mock_event_emitter(event):
         console.log(f"[dim]Event emitted: {event}[/dim]")
 
+    # Ensure the output directory exists
+    output_dir = "tests/test_outputs"
+    os.makedirs(output_dir, exist_ok=True)
+
     # Run each scenario
     for scenario_name, conversation_messages in test_scenarios.items():
         console.rule(f"[bold yellow]Testing scenario: {scenario_name}[/bold yellow]")
@@ -355,6 +357,11 @@ async def test_pipe_scenarios():
         else:
             console.log(response, style="dim")        
         
+                # Save the response to a local file
+        output_file_path = os.path.join(output_dir, f"{scenario_name}_output.txt")
+        with open(output_file_path, "w", encoding="utf-8") as file:
+            file.write(response)
+
         console.rule("[bold green]End of scenario[/bold green]")
 
         # Optionally add asserts here for validation

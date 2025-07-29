@@ -1,0 +1,2267 @@
+from typing import List, Dict, Any, Union, Optional, TypedDict
+from langchain_core.tools import tool
+from rich.console import Console
+from rich.panel import Panel
+from rich.pretty import Pretty
+from rich.text import Text
+from rich.markdown import Markdown
+from langchain_neo4j import Neo4jGraph
+import json
+import logging
+import os
+import coloredlogs
+import asyncio
+from langchain_core.messages import AIMessage
+from fake_useragent import UserAgent
+import re
+from urllib.parse import urlparse, urljoin
+import unicodedata
+import time
+
+# Define Citation type using TypedDict
+class Citation(TypedDict):
+    """
+    TypedDict for standardized citation format used throughout RULAC tools.
+    
+    Attributes:
+        title: The title of the citation/source to be displayed in UI as visible SOURCE (e.g. "RULAC - Military Occupation of Ukraine")
+        url: The URL to the source
+        formatted_content: The formatted content behind the citation, public facing and used for display purposes in UI
+    """
+    title: str
+    url: str
+    formatted_content: str
+
+# Define RULAC_TOOL_RESULT type using TypedDict
+class RULAC_TOOL_RESULT(TypedDict):
+    """
+    TypedDict for standardized RULAC tool result format used throughout RULAC tools.
+    
+    Attributes:
+        content: The main content of the results (can be a string, list, or dictionary)
+        citations: List of citation dictionaries
+        tool_use_metadata: Information about tool usage including name and parameters
+    """
+    content: Union[str, List[Dict[str, Any]], Dict[str, Any]]
+    citations: List[Citation]
+    tool_use_metadata: Optional[Dict[str, Any]]
+
+# Global configuration values
+tool_specific_valves = {
+    "NEO4J_URL": "bolt://neo4j-arm:7687",
+    "NEO4J_TESTING_URL": "bolt://localhost:7687",
+    "NEO4J_USERNAME": "neo4j",
+    "NEO4J_PASSWORD": "password",
+}
+
+# Initialize Rich Console
+console = Console()
+
+# Configure logging
+logger = logging.getLogger("Beacon")
+coloredlogs.install(
+    logger=logger,
+    level="INFO",
+    isatty=True,
+    fmt="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+# === NEW STANDARDIZED HELPER FUNCTIONS ===
+
+def create_standard_citation(
+    title: str, 
+    url: str, 
+    formatted_content: str = ""
+) -> Citation:
+    """
+    Create a standard citation dictionary that can be used by the OpenWebUI event emitter UI
+    
+    Args:
+        title (str): The title of the citation
+        url (str): The URL to the source
+        formatted_content (str, optional): The formatted content to include in the citation. Defaults to empty string.
+    
+    Returns:
+        Citation: A dictionary containing citation information
+    """
+    logger.debug(f"Creating standard citation for: {title}")
+
+    # Return Citation TypedDict with the three required fields
+    return {
+        "title": title,
+        "url": url,
+        "formatted_content": formatted_content
+    }
+
+
+def format_standard_tool_result(
+    content: Union[str, List[Dict[str, Any]], Dict[str, Any]], 
+    citations: List[Citation],
+    tool_name: Optional[str] = None,
+    tool_params: Optional[Dict[str, Any]] = None,
+    beacon_tool_source: str = "RULAC"
+) -> RULAC_TOOL_RESULT:
+    """
+    Format tool results in a standardized structure.
+    
+    Args:
+        content (Union[str, List[Dict[str, Any]], Dict[str, Any]]): The main content of the results
+        citations (List[Citation]): List of citation dictionaries
+        tool_name (Optional[str]): Name of the tool being used
+        tool_params (Optional[Dict[str, Any]]): Parameters used for the tool call
+        beacon_tool_source (str): Source of the tool ("RULAC", "WEB", etc.). Defaults to "RULAC".
+    
+    Returns:
+        RULAC_TOOL_RESULT: A standardized result dictionary
+    """
+    logger.debug("Formatting standard tool result")
+    
+    # Create tool use metadata if either tool_name or tool_params is provided
+    tool_use_metadata = None
+    if tool_name or tool_params:
+        tool_use_metadata = {
+            "tool_source": beacon_tool_source,
+            "tool_name": tool_name,
+            "tool_params": tool_params or {}
+        }
+    
+    result: RULAC_TOOL_RESULT = {
+        "content": content,
+        "citations": citations,
+        "tool_use_metadata": tool_use_metadata
+    }
+    
+    return result
+    
+async def standardized_tool_test(
+    tool_function: callable, 
+    test_scenarios: List[Dict[str, Any]],
+    test_title: str = "RULAC Tool Test"
+) -> None:
+    """
+    Run standardized tests on a RULAC tool function.
+    
+    Args:
+        tool_function (callable): The tool function to test
+        test_scenarios (List[Dict[str, Any]]): List of test scenarios with parameters
+        test_title (str, optional): Title for the test. Defaults to "RULAC Tool Test".
+    """
+    console.print(Panel(f"[bold]{test_title}[/]", style="bold white on blue", border_style="blue"))
+    
+    for scenario in test_scenarios:
+        scenario_name = scenario.get("name", "Unnamed Test Scenario")
+        
+        try:
+            # Track execution time
+            start_time = time.time()
+            
+            # Extract parameters
+            params = scenario["params"]
+            
+            # For LangChain tools, we need to properly format input
+            if hasattr(tool_function, "ainvoke"):
+                # Pass the params dictionary directly to ainvoke
+                results = await tool_function.ainvoke(params)
+            else:
+                # For regular async functions, use normal call
+                results = await tool_function(**params)
+            
+            end_time = time.time()
+            execution_time = end_time - start_time
+            
+            # Success message
+            console.print(f"[green]✓ Test completed in {execution_time:.2f} seconds[/]")
+            
+            # We don't need to preview results here as they will be displayed
+            # in the INFO panel during tool execution
+            
+        except Exception as e:
+            # Failure message
+            console.print(f"[red]✗ Test failed: {str(e)}[/]")
+            logger.error(f"Test failed for {scenario_name}: {str(e)}")
+    
+    console.print(f"\n[bold green]All tests completed for {test_title}[/]")
+
+# Global Neo4j graph connection
+graph = None
+
+def initialize_neo4j(local_testing=False):
+    """Initialize the Neo4j graph connection using configuration values"""
+    global graph
+    
+    # If graph is already initialized, just return it
+    if graph is not None:
+        return graph
+    
+    # Dynamically switch Neo4j URL based on the testing flag
+    neo4j_url = tool_specific_valves["NEO4J_TESTING_URL"] if local_testing else tool_specific_valves["NEO4J_URL"]
+    neo4j_username = tool_specific_valves["NEO4J_USERNAME"]
+    neo4j_password = tool_specific_valves["NEO4J_PASSWORD"]
+    
+    # Debugging: Neo4j connection
+    print(f"DEBUG: Connecting to Neo4j at {neo4j_url} with username {neo4j_username}")
+    
+    try:
+        # Connect to Neo4j using the provided credentials
+        graph = Neo4jGraph(
+            url=neo4j_url,
+            username=neo4j_username,
+            password=neo4j_password,
+            enhanced_schema=False,
+        )
+        return graph
+    except Exception as conn_error:
+        error_msg = f"Error connecting to Neo4j: {conn_error}"
+        logger.error(error_msg)
+        raise Exception(error_msg) from conn_error
+
+# Initialize the Neo4j connection once at module load time
+try:
+    # Default to local testing mode which uses localhost Neo4j
+    # This can be overridden when the function is called
+    if os.path.exists("/app/backend/beacon_code"):
+        graph = initialize_neo4j(local_testing=False)
+    else:
+        graph = initialize_neo4j(local_testing=True)
+    print("DEBUG: Neo4j connection initialized successfully")
+except Exception as e:
+    print(f"WARNING: Failed to initialize Neo4j on module load: {e}")
+    print("Tools requiring Neo4j will attempt to reconnect when used")
+
+
+class HelpFunctions:
+    def get_base_url(self, url):
+        """Extract base URL from full URL."""
+        parsed = urlparse(url)
+        return parsed.netloc
+
+    def remove_emojis(self, text):
+        """Remove emojis from text."""
+        emoji_pattern = re.compile("["
+            u"\U0001F600-\U0001F64F"  # emojis
+            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+            u"\U0001F680-\U0001F6FF"  # transport & map symbols
+            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            u"\U00002702-\U000027B0"
+            u"\U000024C2-\U0001F251"
+            "]+", flags=re.UNICODE)
+        return emoji_pattern.sub(r'', text)
+
+
+# # Load Beacon public files from local files if os path doesnt exist
+# else:
+try:
+
+        # system prompts
+
+        # Final System Prompts for General and Tool Agents
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_StateActor
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_NonStateActor
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_taking_place_country
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_org
+        from prompts.indv_tool_prompts import tool_cypher_RULAC_conflict_by_Region
+        from prompts.indv_tool_prompts import baselineRULACinfo
+        from prompts.indv_tool_prompts import baselineClassificationMethodology
+        from prompts.indv_tool_prompts import baselineIHLLegalFramework
+
+except Exception as e:
+        print("DEBUG: Error importing code and functions:", e)
+        raise
+
+
+def substitute_params(query: str, params: dict) -> str:
+    """Return a debug version of the query with parameters substituted as strings."""
+    debug_query = query
+    for key, value in params.items():
+        # Convert the value to its JSON representation so that lists/strings are properly quoted.
+        debug_value = json.dumps(value)
+        debug_query = debug_query.replace(f"${key}", debug_value)
+    return debug_query
+
+
+def process_rulac_data(data: dict, research_query: str = "No query provided") -> tuple[str, List[Citation]]:
+    """
+    Processes RULAC research data by formatting it into a human-readable markdown string
+    and extracting citation information. 
+    
+    Args:
+        data: The research data dictionary from Neo4j
+        research_query: The original research query used (defaults to "No query provided")
+    
+    Returns:
+        tuple[str, List[Citation]]: A tuple containing (formatted_content, citations)
+            - formatted_content: Formatted markdown string with the research results
+            - citations: A list of citation dictionaries
+    """
+    logger.debug("Processing RULAC data: formatting and collecting citations")
+    
+    # ----- FORMATTING CONTENT -----
+    # Extract the summary if present
+    summary = data.get("summary", "No summary available.")
+    
+    # Extract and format conflicts
+    formatted_conflicts = []
+    conflicts = data.get("conflict_details", [])
+    
+    # ----- COLLECTING CITATIONS -----
+    citations: List[Citation] = []
+    
+    for conflict in conflicts:
+        # Format conflict details
+        formatted = (
+            f"Conflict Name: {conflict.get('conflict_name', 'Unnamed Conflict')}\n"
+            f"Conflict Classification under IHL: {conflict.get('conflict_classification', 'N/A')}\n"
+            f"Overview: {conflict.get('conflict_overview', 'N/A')}\n"
+            f"Applicable IHL Law: {conflict.get('applicable_ihl_law', 'N/A')}\n"
+            f"State Parties: {conflict.get('state_parties', 'None recorded')}\n"
+            f"Non-State Parties: {conflict.get('non_state_parties', 'None recorded')}\n"
+            # f"Source Citation: {conflict.get('conflict_citation', 'No Citation Available')}\n"
+        )
+        formatted_conflicts.append(formatted)
+        
+        # Create citation for this conflict
+        if "conflict_citation" in conflict and "conflict_name" in conflict:
+            citation = create_standard_citation(
+                title="RULAC - " + conflict.get("conflict_name", "Unnamed Conflict"),
+                url=conflict.get("conflict_citation", "https://www.rulac.org"),
+                formatted_content=formatted
+            )
+            citations.append(citation)
+    
+    conflicts_text = "\n---\n".join(formatted_conflicts) if formatted_conflicts else "No conflict details available."
+    
+    formatted_output = (
+        f"<RULAC_Research>\n"
+        # output a human readable of the query that was used to generate the RULAC research
+        f"RULAC research task: {research_query}\n\n"
+        f"RULAC research answer:\n"
+        f"{summary}\n\n"
+        f"Conflict details:\n\n"
+        f"{conflicts_text}"
+        f"\n</RULAC_Research>"
+    )
+    
+    # Add a summary citation if needed
+    if not citations and "summary" in data:
+        # Add a fallback general citation if no specific conflict citations were found
+        citation = create_standard_citation(
+            title="RULAC",
+            url="https://www.rulac.org",
+            formatted_content=summary
+        )
+        citations.append(citation)
+    
+    return formatted_output, citations
+
+
+
+def display_formatted_results(cleaned_tool_message, title="RULAC CLEANED TOOL RESULTS", tool_name=None, tool_params=None, citations: Optional[List[Citation]]=None, beacon_tool_source: str = "RULAC", showFull: bool = False):
+    """
+    Displays a formatted panel with the cleaned tool results.
+    
+    Args:
+        cleaned_tool_message: The formatted tool message to display
+        title: The title for the panel (defaults to "RULAC CLEANED TOOL RESULTS")
+        tool_name: The name of the tool being used (optional)
+        tool_params: Dictionary of parameters used for the tool call (optional)
+        citations: List of citation dictionaries (optional). If provided, these will be displayed.
+        beacon_tool_source: Source of the tool ("RULAC", "WEB", etc.). Defaults to "RULAC".
+        showFull: When True, displays the full message content. When False (default), shows only the first 500 characters.
+        
+    Returns:
+        None: This function only displays results but does not return anything
+        
+    Note:
+        This function creates a RULAC_TOOL_RESULT object internally for display purposes.
+    """
+    
+    content = cleaned_tool_message
+    # Only extract citations from message if not provided directly
+    if citations is None:
+        if isinstance(cleaned_tool_message, list):
+            # Handle old format (list of results)
+            content = []
+            citations: List[Citation] = []
+            
+            for item in cleaned_tool_message:
+                if isinstance(item, dict):
+                    if "name" in item:
+                        content.append(item)
+                        if "link" in item:
+                            citations.append({
+                                "title": item["name"],
+                                "url": item["link"],
+                                "source": "RULAC Database",
+                                "type": "reference"
+                            })
+                    elif "content" in item:
+                        # File-based tool result
+                        content = item["content"]
+                        if "url" in item and "title" in item:
+                            citations.append({
+                                "title": item["title"],
+                                "url": item["url"],
+                                "source": "RULAC Website",
+                                "type": "reference"
+                            })
+        else:
+            # Handle string content with no citations provided
+            citations: List[Citation] = []
+    
+    # Create tool_use_metadata if needed
+    tool_use_metadata = None
+    if tool_name or tool_params:
+        tool_use_metadata = {
+            "tool_source": beacon_tool_source,
+            "tool_name": tool_name,
+            "tool_params": tool_params or {}
+        }
+    
+    # Create standardized result
+    result: RULAC_TOOL_RESULT = {
+        "content": content,
+        "citations": citations,
+        "tool_use_metadata": tool_use_metadata
+    }
+    
+    # Display results using standardized approach
+    # Determine whether to show the full content or a truncated version
+    display_content = str(cleaned_tool_message)
+    word_count_of_content = len(display_content.split())
+
+    if not showFull and len(display_content) > 500:
+        display_content = display_content[:500] + "..."
+        
+    results_panel = Panel(
+        Markdown(display_content),
+        style="green on white",
+        border_style="black",
+        title=f"[TOOL INFO] {title}" + (" [FULL]" if showFull else ""),
+        title_align="left",
+        expand=True,
+    )            
+    console.print(results_panel)
+    
+    # If citations are present, display a blue citations panel
+    if citations:
+        # Count total citations
+        citation_count = len(citations)
+        
+        # Format citations as a list with checkmarks
+        citation_list = f"{citation_count} citations collected"
+        for citation in citations:
+            # Extract just the hostname and path from the URL
+            url = citation.get('url', '')
+            parsed_url = urlparse(url)
+            display_url = f"{parsed_url.netloc}{parsed_url.path}"
+            
+            # Get the citation title
+            title = citation.get('title', 'Unknown')
+            
+            # Add a checkmark for each citation with title and URL
+            citation_list += f"\n✓ {title} - {display_url}"
+        
+        citations_panel = Panel(
+            citation_list,
+            style="white on blue",
+            border_style="blue",
+            title="[CITATIONS]",
+            title_align="left",
+        )
+        console.print(citations_panel)
+
+    # If tool information was provided, display a blue tool info panel
+    if tool_use_metadata:
+        # Create formatted params string if params exist
+        params_str = ""
+        if tool_params:
+            params_str = "\n\nParameters:"
+            for key, value in tool_params.items():
+                if isinstance(value, list):
+                    if len(value) > 0:
+                        params_str += f"\n- {key}: {', '.join(str(v) for v in value)}"
+                    else:
+                        params_str += f"\n- {key}: []"
+                else:
+                    params_str += f"\n- {key}: {value}"
+        
+        # Create the tool info panel
+        tool_info_panel = Panel(
+            f"Tool: {tool_name or 'Unknown'}\nSource: {tool_use_metadata.get('tool_source', 'RULAC')}{params_str}\nWord Count: {word_count_of_content}",
+            style="white on blue",
+            border_style="blue",
+            title="[TOOL EXECUTION DETAILS]",
+            title_align="left",
+            expand=False,
+        )
+        console.print(tool_info_panel)# Create standardized result structure for compatibility
+
+
+
+def truncate_to_n_words(text, token_limit):
+    tokens = text.split()
+    truncated_tokens = tokens[:token_limit]
+    return " ".join(truncated_tokens)
+
+
+def get_base_url(url):
+    """Extract base URL from full URL."""
+    parsed_url = urlparse(url)
+    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+    return base_url
+
+def generate_excerpt(content, max_length=200):
+    """
+    Generate a clean excerpt from content, truncating properly at word boundaries 
+    and removing excess whitespace.
+    """
+    if not content:
+        return ""
+        
+    # Clean up the content
+    clean_content = re.sub(r'\s+', ' ', content).strip()
+    
+    # Return full content instead of truncated excerpt
+    return clean_content
+
+def remove_emojis(text):
+    """Remove emojis from text."""
+    if not text:
+        return ""
+    return "".join(c for c in text if not unicodedata.category(c).startswith("So"))
+
+
+
+
+# TOOLS
+
+@tool
+async def retreive_RULAC_conflict_data_by_state_actor_involvement(
+    research_query: str,
+    target_state_actor_UN_M49_codes: List,
+    target_conflict_types: List,
+) -> RULAC_TOOL_RESULT:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) involving state actors. 
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts per xStateActor by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+
+    ## Steps
+    1. Identify the most relevent research_query from the user query
+    2. Identify the state actor(s) to retreive conflict data
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+
+    ## Example Tool Call Parameters
+    
+    "What IAC and Military Occupation conflicts involve state actor France and Russia?"
+    research_query: "IAC and Military Occupation conflicts involving France and Russia"
+    target_state_actor_UN_M49_codes: ["250", "643"]
+    target_conflict_types: ["International Armed Conflict (IAC)", "Military Occupation"]
+
+    "What conflicts is USA a party to and what IHL law applies?"
+    research_query: "Retreive RULAC conflict data involving United States of America"
+    target_state_actor_UN_M49_codes: ["840"]
+    target_conflict_types: []
+
+
+
+### Full list of countries and their UN M49 Codes
+
+Important: Each country code is three digits long. Even if the country code starts with a "0", keep the "0" in the code so the code remains three digits in length, e.g. "Bahamas" is "044" not "44", "Botswana is "072"
+
+- Afghanistan ("004")
+- Albania ("008")
+- Antarctica ("010")
+- Algeria ("012")
+- American Samoa ("016")
+- Andorra ("020")
+- Angola ("024")
+- Antigua and Barbuda ("028")
+- Azerbaijan ("031")
+- Argentina ("032")
+- Australia ("036")
+- Austria ("040")
+- Bahamas ("044")
+- Bahrain ("048")
+- Bangladesh ("050")
+- Armenia ("051")
+- Barbados ("052")
+- Belgium ("056")
+- Bermuda ("060")
+- Bhutan ("064")
+- Bolivia (Plurinational State of) ("068")
+- Bosnia and Herzegovina ("070")
+- Botswana ("072")
+- Bouvet Island ("074")
+- Brazil ("076")
+- Belize ("084")
+- British Indian Ocean Territory ("086")
+- Solomon Islands ("090")
+- British Virgin Islands ("092")
+- Brunei Darussalam ("096")
+- Bulgaria ("100")
+- Myanmar ("104")
+- Burundi ("108")
+- Belarus ("112")
+- Cambodia ("116")
+- Cameroon ("120")
+- Canada ("124")
+- Cabo Verde ("132")
+- Cayman Islands ("136")
+- Central African Republic ("140")
+- Sri Lanka ("144")
+- Chad ("148")
+- Chile ("152")
+- China ("156")
+- Christmas Island ("162")
+- Cocos (Keeling) Islands ("166")
+- Colombia ("170")
+- Comoros ("174")
+- Mayotte ("175")
+- Congo ("178")
+- Democratic Republic of the Congo ("180")
+- Cook Islands ("184")
+- Costa Rica ("188")
+- Croatia ("191")
+- Cuba ("192")
+- Cyprus ("196")
+- Czechia ("203")
+- Benin ("204")
+- Denmark ("208")
+- Dominica ("212")
+- Dominican Republic ("214")
+- Ecuador ("218")
+- El Salvador ("222")
+- Equatorial Guinea ("226")
+- Ethiopia ("231")
+- Eritrea ("232")
+- Estonia ("233")
+- Faroe Islands ("234")
+- Falkland Islands (Malvinas) ("238")
+- South Georgia and the South Sandwich Islands ("239")
+- Fiji ("242")
+- Finland ("246")
+- Åland Islands ("248")
+- France ("250")
+- French Guiana ("254")
+- French Polynesia ("258")
+- French Southern Territories ("260")
+- Djibouti ("262")
+- Gabon ("266")
+- Georgia ("268")
+- Gambia ("270")
+- Palestine ("275")
+- Germany ("276")
+- Ghana ("288")
+- Gibraltar ("292")
+- Kiribati ("296")
+- Greece ("300")
+- Greenland ("304")
+- Grenada ("308")
+- Guadeloupe ("312")
+- Guam ("316")
+- Guatemala ("320")
+- Guinea ("324")
+- Guyana ("328")
+- Haiti ("332")
+- Heard Island and McDonald Islands ("334")
+- Holy See ("336")
+- Honduras ("340")
+- Hungary ("348")
+- Iceland ("352")
+- India ("356")
+- Indonesia ("360")
+- Iran ("364")
+- Iraq ("368")
+- Ireland ("372")
+- Israel ("376")
+- Italy ("380")
+- Côte d'Ivoire ("384")
+- Jamaica ("388")
+- Japan ("392")
+- Kazakhstan ("398")
+- Jordan ("400")
+- Kenya ("404")
+- Democratic People's Republic of Korea ("408")
+- Republic of Korea ("410")
+- Kuwait ("414")
+- Kyrgyzstan ("417")
+- Lao People's Democratic Republic ("418")
+- Lebanon ("422")
+- Lesotho ("426")
+- Latvia ("428")
+- Liberia ("430")
+- Libya ("434")
+- Liechtenstein ("438")
+- Lithuania ("440")
+- Luxembourg ("442")
+- Madagascar ("450")
+- Malawi ("454")
+- Malaysia ("458")
+- Maldives ("462")
+- Mali ("466")
+- Malta ("470")
+- Martinique ("474")
+- Mauritania ("478")
+- Mauritius ("480")
+- Mexico ("484")
+- Monaco ("492")
+- Mongolia ("496")
+- Republic of Moldova ("498")
+- Montenegro ("499")
+- Montserrat ("500")
+- Morocco ("504")
+- Mozambique ("508")
+- Oman ("512")
+- Namibia ("516")
+- Nauru ("520")
+- Nepal ("524")
+- Netherlands ("528")
+- Curaçao ("531")
+- Aruba ("533")
+- Sint Maarten (Dutch part) ("534")
+- New Caledonia ("540")
+- Vanuatu ("548")
+- New Zealand ("554")
+- Nicaragua ("558")
+- Niger ("562")
+- Nigeria ("566")
+- Niue ("570")
+- Norfolk Island ("574")
+- Norway ("578")
+- Northern Mariana Islands ("580")
+- United States Minor Outlying Islands ("581")
+- Micronesia (Federated States of) ("583")
+- Marshall Islands ("584")
+- Palau ("585")
+- Pakistan ("586")
+- Panama ("591")
+- Papua New Guinea ("598")
+- Paraguay ("600")
+- Peru ("604")
+- Philippines ("608")
+- Pitcairn ("612")
+- Poland ("616")
+- Portugal ("620")
+- Guinea-Bissau ("624")
+- Timor-Leste ("626")
+- Puerto Rico ("630")
+- Qatar ("634")
+- Réunion ("638")
+- Romania ("642")
+- Russian Federation ("643")
+- Rwanda ("646")
+- Saint Barthélemy ("652")
+- Saint Helena ("654")
+- Saint Kitts and Nevis ("659")
+- Anguilla ("660")
+- Saint Lucia ("662")
+- Saint Martin (French Part) ("663")
+- Saint Pierre and Miquelon ("666")
+- Saint Vincent and the Grenadines ("670")
+- San Marino ("674")
+- Sao Tome and Principe ("678")
+- Saudi Arabia ("682")
+- Senegal ("686")
+- Serbia ("688")
+- Seychelles ("690")
+- Sierra Leone ("694")
+- Singapore ("702")
+- Slovakia ("703")
+- Viet Nam ("704")
+- Slovenia ("705")
+- Somalia ("706")
+- South Africa ("710")
+- Zimbabwe ("716")
+- Spain ("724")
+- South Sudan ("728")
+- Sudan ("729")
+- Western Sahara ("732")
+- Suriname ("740")
+- Svalbard and Jan Mayen Islands ("744")
+- Eswatini ("748")
+- Sweden ("752")
+- Switzerland ("756")
+- Syrian Arab Republic ("760")
+- Tajikistan ("762")
+- Thailand ("764")
+- Togo ("768")
+- Tokelau ("772")
+- Tonga ("776")
+- Trinidad and Tobago ("780")
+- United Arab Emirates ("784")
+- Tunisia ("788")
+- Türkiye ("792")
+- Turkmenistan ("795")
+- Turks and Caicos Islands ("796")
+- Tuvalu ("798")
+- Uganda ("800")
+- Ukraine ("804")
+- North Macedonia ("807")
+- Egypt ("818")
+- United Kingdom of Great Britain and Northern Ireland ("826")
+- Guernsey ("831")
+- Jersey ("832")
+- Isle of Man ("833")
+- United Republic of Tanzania ("834")
+- United States of America ("840")
+- United States Virgin Islands ("850")
+- Burkina Faso ("854")
+- Uruguay ("858")
+- Uzbekistan ("860")
+- Venezuela ("862")
+- Wallis and Futuna Islands ("876")
+- Samoa ("882")
+- Yemen ("887")
+- Zambia ("894")
+
+Note:
+- 729 for modern Sudan after the separation of South Sudan in 2011
+- 275 for Palestine
+- 804 for Ukraine
+- 356 for India
+
+    
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :param target_state_actor_UN_M49_codes: List of UN_M49 codes for identified state actors in query
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    tool_name = "retreive_RULAC_conflict_data_by_state_actor_involvement"
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+    
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+        
+    # Prepare the parameters for the query
+    params = {
+        "target_state_actor_UN_M49_codes": target_state_actor_UN_M49_codes,
+        "target_conflict_types": target_conflict_types,
+        "research_query": research_query
+    }
+
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_by_StateActor.PROMPT
+
+    # DEBUGGING section
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            logger.warning("No RULAC data found.")
+            
+            # Format empty result
+            empty_result = format_standard_tool_result(
+                content="No RULAC conflict data found for the specified state actors and conflict types.",
+                citations=[], # Empty List[Citation]
+                tool_name=tool_name,
+                tool_params=params
+            )
+            
+            # Display "no results" message with tool info
+            display_formatted_results(
+                "No RULAC conflict data found for the specified state actors and conflict types.",
+                title="RULAC Search: No Results",
+                tool_name=tool_name,
+                tool_params=params
+            )
+            
+            # Print end marker for tool execution
+            console.print("\n[bold white]" + "="*50 + "\n" + 
+                         f"ENDING TOOL: {tool_name} (with empty result)\n" + 
+                         "="*50 + "[/bold white]\n")
+            
+            return empty_result
+
+        # IF there are results, format the result content
+        # Assume the first record contains the required RULAC_research field   
+        research_result = results[0].get("RULAC_research")
+        
+        # Process the result data - formatting content and collecting citations in one step
+        formatted_content, citations = process_rulac_data(research_result, research_query)
+
+        # Format the standardized result
+        result = format_standard_tool_result(
+            content=formatted_content,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        display_formatted_results(
+            formatted_content, 
+            title=f"RULAC Conflicts Involving State Actors", 
+            tool_name=tool_name, 
+            tool_params=params, 
+            citations=citations,
+            showFull=True  # Show full content for this comprehensive report
+        )
+
+        # Print end marker for tool execution
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return result
+
+    except Exception as e:
+        error_message = f"Error retrieving RULAC data: {str(e)}"
+        logger.error(error_message)
+        
+        # Format error result
+        error_result = format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Display error message with tool info
+        display_formatted_results(
+            error_message,
+            title="RULAC Search: Error",
+            tool_name=tool_name,
+            tool_params=params,
+            citations=[]
+        )
+        
+        # Print end marker for tool execution
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                    f"ENDING TOOL: {tool_name} (with error)\n" + 
+                    "="*50 + "[/bold white]\n")
+        
+        return error_result
+
+@tool
+async def retreive_RULAC_conflict_data_by_non_state_actor_involvement(
+    research_query: str,
+    target_non_state_actor_name_and_aliases: List,
+) -> RULAC_TOOL_RESULT:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) involving non-state actors. 
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts involving xNonStateActor.
+
+    ## Steps
+    1. Identify the most relevent research_query from the user query
+    2. Identify the non-state actor mentioned in the research question and define a list of alterntate spellings, aliases and acroynms for the non-state actor(s) in `target_non_state_actor_name_and_aliases`. This is to ensure data retreival is flexible enough.
+
+
+    ## Example Tool Call Parameters
+    
+    query: "What conflicts involve Hezbollah?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["Hezbollah", "Hizbollah, "Hizbullah", "Hizballah", "Party of God"]
+
+    query: "What IAC and Military Occupation conflicts involve non-state actors ISIS?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["ISIS", "Islamic State", "Daesh"]
+
+    query: "How many conflicts involve ISIS and what IHL law applies?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["ISIS", "Islamic State", "Daesh"]
+
+    query: "Are there more conflicts involving Hezbollah or involving FARC?"
+    research_query: "Retreive RULAC conflict data involving non-state actor 'ISIS'"
+    target_non_state_actor_name_and_aliases: ["Hezbollah", "Hizbollah, "Hizbullah", "Hizballah", "Party of God", "Revolutionary Armed Forces of Colombia (FARC)", "Revolutionary Armed Forces", "FARC", "Fuerzas Armadas Revolucionarias de Colombia"]
+
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :param target_non_state_actor_name_and_aliases: List of spellings for identified non-state actors in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    tool_name = "retreive_RULAC_conflict_data_by_non_state_actor_involvement"
+    
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+    
+    try:
+        # Make sure Neo4j is connected
+        global graph
+        if graph is None:
+            # Try to initialize the connection
+            graph = initialize_neo4j(local_testing=True)
+            
+        # Prepare the parameters for the query
+        params = {
+            "research_query": research_query,
+            "target_non_state_actor_name_and_aliases": target_non_state_actor_name_and_aliases
+        }
+
+        # Load tool-specific cypher template
+        TOOL_PROMPT = tool_cypher_RULAC_conflict_by_NonStateActor.PROMPT
+
+        # DEBUGGING statement
+        # Create a debug version of the query with parameters substituted
+        debug_query = substitute_params(TOOL_PROMPT, params)
+        if logger.getEffectiveLevel() == logging.DEBUG:
+                panel = Panel(
+                    Markdown(debug_query),
+                    border_style="blue",
+                    title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                    title_align="left",
+                    expand=True,
+                )            
+                console.print(panel)
+
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            # Display "no results" message with tool info
+            display_formatted_results(
+                "No RULAC conflict data found for the specified non-state actors.",
+                title="RULAC Search: No Results",
+                tool_name=tool_name,
+                tool_params=params
+            )
+            
+            # Print end marker for tool execution
+            console.print("\n[bold white]" + "="*50 + "\n" + 
+                         f"ENDING TOOL: {tool_name} (with empty result)\n" + 
+                         "="*50 + "[/bold white]\n")
+            
+            return format_standard_tool_result(
+                content="No RULAC data found.",
+                citations=[], # Empty List[Citation]
+                tool_name=tool_name,
+                tool_params=params
+            )
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Process the result data - formatting content and collecting citations in one step
+        cleanedToolMessage, citations = process_rulac_data(research_result, research_query)
+
+        # Display formatted results
+        display_formatted_results(
+            cleanedToolMessage, 
+            title="RULAC Conflicts Involving Non-State Actors", 
+            tool_name=tool_name, 
+            tool_params=params, 
+            citations=citations,
+            showFull=False  # Show truncated content for quicker review
+        )
+
+        # Print end marker for tool execution before returning
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        # Return both the formatted result and citations using standardized format
+        return format_standard_tool_result(
+            content=cleanedToolMessage,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+    except Exception as e:
+        error_message = f"Error retrieving RULAC data: {str(e)}"
+        
+        # Display error message with tool info
+        display_formatted_results(
+            error_message,
+            title="RULAC Search: Error",
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution on error
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+
+
+@tool
+async def retreive_RULAC_conflict_data_by_conflict_taking_place_in_country(
+    research_query: str,
+    target_country_UN_M49_codes: List,
+    target_conflict_types: List,
+) -> RULAC_TOOL_RESULT:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) taking place in a given country. The tool returns all conflicts in the target country or countries.
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts per country by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+
+    ## Steps
+    1. Identify the most relevent research_query from the user query
+    2. Identify the country or countries where the conflicts take place
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+
+    ## Example Tool Call Parameters
+    
+    query: "What IAC and Military Occupation conflicts are taking place in France and Russia?"
+    research_query: "Retreive RULAC conflict data for conflicts taking place in France and Russia classified as 'International Armed Conflict (IAC)' and 'Military Occupation'"
+    target_country_UN_M49_codes: ["250", "643"]
+    target_conflict_types: ["International Armed Conflict (IAC)", "Military Occupation"]
+
+    query: "What conflicts are taking place in the USA and what IHL law applies?"
+    research_query: "Retreive RULAC conflict data for conflicts taking place in United States of America"
+    target_country_UN_M49_codes: ["840"]
+    target_conflict_types: []
+
+
+
+### Full list of countries and their UN M49 Codes
+
+Important: Each country code is three digits long. Even if the country code starts with a "0", keep the "0" in the code so the code remains three digits in length, e.g. "Bahamas" is "044" not "44", "Botswana is "072"
+
+- Afghanistan ("004")
+- Albania ("008")
+- Antarctica ("010")
+- Algeria ("012")
+- American Samoa ("016")
+- Andorra ("020")
+- Angola ("024")
+- Antigua and Barbuda ("028")
+- Azerbaijan ("031")
+- Argentina ("032")
+- Australia ("036")
+- Austria ("040")
+- Bahamas ("044")
+- Bahrain ("048")
+- Bangladesh ("050")
+- Armenia ("051")
+- Barbados ("052")
+- Belgium ("056")
+- Bermuda ("060")
+- Bhutan ("064")
+- Bolivia (Plurinational State of) ("068")
+- Bosnia and Herzegovina ("070")
+- Botswana ("072")
+- Bouvet Island ("074")
+- Brazil ("076")
+- Belize ("084")
+- British Indian Ocean Territory ("086")
+- Solomon Islands ("090")
+- British Virgin Islands ("092")
+- Brunei Darussalam ("096")
+- Bulgaria ("100")
+- Myanmar ("104")
+- Burundi ("108")
+- Belarus ("112")
+- Cambodia ("116")
+- Cameroon ("120")
+- Canada ("124")
+- Cabo Verde ("132")
+- Cayman Islands ("136")
+- Central African Republic ("140")
+- Sri Lanka ("144")
+- Chad ("148")
+- Chile ("152")
+- China ("156")
+- Christmas Island ("162")
+- Cocos (Keeling) Islands ("166")
+- Colombia ("170")
+- Comoros ("174")
+- Mayotte ("175")
+- Congo ("178")
+- Democratic Republic of the Congo ("180")
+- Cook Islands ("184")
+- Costa Rica ("188")
+- Croatia ("191")
+- Cuba ("192")
+- Cyprus ("196")
+- Czechia ("203")
+- Benin ("204")
+- Denmark ("208")
+- Dominica ("212")
+- Dominican Republic ("214")
+- Ecuador ("218")
+- El Salvador ("222")
+- Equatorial Guinea ("226")
+- Ethiopia ("231")
+- Eritrea ("232")
+- Estonia ("233")
+- Faroe Islands ("234")
+- Falkland Islands (Malvinas) ("238")
+- South Georgia and the South Sandwich Islands ("239")
+- Fiji ("242")
+- Finland ("246")
+- Åland Islands ("248")
+- France ("250")
+- French Guiana ("254")
+- French Polynesia ("258")
+- French Southern Territories ("260")
+- Djibouti ("262")
+- Gabon ("266")
+- Georgia ("268")
+- Gambia ("270")
+- Palestine ("275")
+- Germany ("276")
+- Ghana ("288")
+- Gibraltar ("292")
+- Kiribati ("296")
+- Greece ("300")
+- Greenland ("304")
+- Grenada ("308")
+- Guadeloupe ("312")
+- Guam ("316")
+- Guatemala ("320")
+- Guinea ("324")
+- Guyana ("328")
+- Haiti ("332")
+- Heard Island and McDonald Islands ("334")
+- Holy See ("336")
+- Honduras ("340")
+- Hungary ("348")
+- Iceland ("352")
+- India ("356")
+- Indonesia ("360")
+- Iran ("364")
+- Iraq ("368")
+- Ireland ("372")
+- Israel ("376")
+- Italy ("380")
+- Côte d'Ivoire ("384")
+- Jamaica ("388")
+- Japan ("392")
+- Kazakhstan ("398")
+- Jordan ("400")
+- Kenya ("404")
+- Democratic People's Republic of Korea ("408")
+- Republic of Korea ("410")
+- Kuwait ("414")
+- Kyrgyzstan ("417")
+- Lao People's Democratic Republic ("418")
+- Lebanon ("422")
+- Lesotho ("426")
+- Latvia ("428")
+- Liberia ("430")
+- Libya ("434")
+- Liechtenstein ("438")
+- Lithuania ("440")
+- Luxembourg ("442")
+- Madagascar ("450")
+- Malawi ("454")
+- Malaysia ("458")
+- Maldives ("462")
+- Mali ("466")
+- Malta ("470")
+- Martinique ("474")
+- Mauritania ("478")
+- Mauritius ("480")
+- Mexico ("484")
+- Monaco ("492")
+- Mongolia ("496")
+- Republic of Moldova ("498")
+- Montenegro ("499")
+- Montserrat ("500")
+- Morocco ("504")
+- Mozambique ("508")
+- Oman ("512")
+- Namibia ("516")
+- Nauru ("520")
+- Nepal ("524")
+- Netherlands ("528")
+- Curaçao ("531")
+- Aruba ("533")
+- Sint Maarten (Dutch part) ("534")
+- New Caledonia ("540")
+- Vanuatu ("548")
+- New Zealand ("554")
+- Nicaragua ("558")
+- Niger ("562")
+- Nigeria ("566")
+- Niue ("570")
+- Norfolk Island ("574")
+- Norway ("578")
+- Northern Mariana Islands ("580")
+- United States Minor Outlying Islands ("581")
+- Micronesia (Federated States of) ("583")
+- Marshall Islands ("584")
+- Palau ("585")
+- Pakistan ("586")
+- Panama ("591")
+- Papua New Guinea ("598")
+- Paraguay ("600")
+- Peru ("604")
+- Philippines ("608")
+- Pitcairn ("612")
+- Poland ("616")
+- Portugal ("620")
+- Guinea-Bissau ("624")
+- Timor-Leste ("626")
+- Puerto Rico ("630")
+- Qatar ("634")
+- Réunion ("638")
+- Romania ("642")
+- Russian Federation ("643")
+- Rwanda ("646")
+- Saint Barthélemy ("652")
+- Saint Helena ("654")
+- Saint Kitts and Nevis ("659")
+- Anguilla ("660")
+- Saint Lucia ("662")
+- Saint Martin (French Part) ("663")
+- Saint Pierre and Miquelon ("666")
+- Saint Vincent and the Grenadines ("670")
+- San Marino ("674")
+- Sao Tome and Principe ("678")
+- Saudi Arabia ("682")
+- Senegal ("686")
+- Serbia ("688")
+- Seychelles ("690")
+- Sierra Leone ("694")
+- Singapore ("702")
+- Slovakia ("703")
+- Viet Nam ("704")
+- Slovenia ("705")
+- Somalia ("706")
+- South Africa ("710")
+- Zimbabwe ("716")
+- Spain ("724")
+- South Sudan ("728")
+- Sudan ("729")
+- Western Sahara ("732")
+- Suriname ("740")
+- Svalbard and Jan Mayen Islands ("744")
+- Eswatini ("748")
+- Sweden ("752")
+- Switzerland ("756")
+- Syrian Arab Republic ("760")
+- Tajikistan ("762")
+- Thailand ("764")
+- Togo ("768")
+- Tokelau ("772")
+- Tonga ("776")
+- Trinidad and Tobago ("780")
+- United Arab Emirates ("784")
+- Tunisia ("788")
+- Türkiye ("792")
+- Turkmenistan ("795")
+- Turks and Caicos Islands ("796")
+- Tuvalu ("798")
+- Uganda ("800")
+- Ukraine ("804")
+- North Macedonia ("807")
+- Egypt ("818")
+- United Kingdom of Great Britain and Northern Ireland ("826")
+- Guernsey ("831")
+- Jersey ("832")
+- Isle of Man ("833")
+- United Republic of Tanzania ("834")
+- United States of America ("840")
+- United States Virgin Islands ("850")
+- Burkina Faso ("854")
+- Uruguay ("858")
+- Uzbekistan ("860")
+- Venezuela ("862")
+- Wallis and Futuna Islands ("876")
+- Samoa ("882")
+- Yemen ("887")
+- Zambia ("894")
+
+Note:
+- 729 for modern Sudan after the separation of South Sudan in 2011
+- 275 for Palestine
+- 804 for Ukraine
+- 356 for India
+
+    
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :param target_country_UN_M49_codes: List of UN_M49 codes for identified countries in query
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    tool_name = "retreive_RULAC_conflict_data_by_conflict_taking_place_in_country"
+    
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+    
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_taking_place_country.PROMPT
+
+    # Prepare the parameters for the query
+    params = {
+        "target_country_UN_M49_codes": target_country_UN_M49_codes,
+        "target_conflict_types": target_conflict_types,
+        "research_query": research_query
+    }
+
+    # DEBUGGING statement
+    # Create a debug version of the query with parameters substituted
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            # Display "no results" message with tool info
+            display_formatted_results(
+                "No RULAC conflict data found for the specified countries.",
+                title="RULAC Search: No Results",
+                tool_name=tool_name,
+                tool_params=params
+            )
+            
+            # Print end marker for tool execution
+            console.print("\n[bold white]" + "="*50 + "\n" + 
+                         f"ENDING TOOL: {tool_name} (with empty result)\n" + 
+                         "="*50 + "[/bold white]\n")
+            
+            return format_standard_tool_result(
+                content="No RULAC data found.",
+                citations=[], # Empty List[Citation]
+                tool_name=tool_name,
+                tool_params=params
+            )
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Process the result data - formatting content and collecting citations in one step
+        cleanedToolMessage, citations = process_rulac_data(research_result, research_query)
+
+        # Display formatted results
+        display_formatted_results(cleanedToolMessage, title="RULAC Conflicts Taking Place in Countries", tool_name=tool_name, tool_params=params, citations=citations)
+
+        # Print end marker for tool execution before returning
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+                
+        # Return both the formatted result and citations
+        return format_standard_tool_result(
+            content=cleanedToolMessage,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+    except Exception as e:
+        error_message = f"Error retrieving RULAC data: {str(e)}"
+        
+        # Display error message with tool info
+        display_formatted_results(
+            error_message,
+            title="RULAC Search: Error",
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution on error
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+
+@tool
+async def retreive_RULAC_conflict_data_by_organization(
+    research_query: str,
+    target_organization_name: List,
+    target_conflict_types: List,
+) -> RULAC_TOOL_RESULT:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) involving political and economic organizations. 
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict. 
+
+    This tool retreive all conflicts involving xOrganization members as a state party to active conflict by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+    This tool can ONLY retreive information regarding the following Organizations: "European Union", "African Union", "G7", "BRICS", "NATO", "ASEAN"
+
+    ## Steps
+    1. Identify the most relevant research_query from the user query
+    2. Identify the organization(s) to retrieve conflict data for
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+    ## Example Tool Call Parameters
+    
+    query: "What IAC conflicts involve BRICS members?",
+    research_query: "Retrieve RULAC conflict data for BRICS members",
+    target_organization_name: ["BRICS"]
+    target_conflict_types: ["International Armed Conflict (IAC)"]
+
+    query: "What conflicts involve NATO?",
+    research_query: "Retrieve RULAC conflict data for NATO"
+    target_organization_name: ["NATO"]
+    target_conflict_types: []
+
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :param target_organization_name: List of spellings for identified non-state actors in query
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    tool_name = "retreive_RULAC_conflict_data_by_organization"
+
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+
+    # Make sure Neo4j is connected
+    global graph
+    if graph is None:
+        # Try to initialize the connection
+        graph = initialize_neo4j(local_testing=True)
+
+    # Load tool-specific cypher template
+    TOOL_PROMPT = tool_cypher_RULAC_conflict_by_org.PROMPT
+
+    # Prepare the parameters for the query
+    params = {
+        "target_organization_name": target_organization_name,
+        "target_conflict_types": target_conflict_types,
+        "research_query": research_query
+    }
+
+    # DEBUGGING statement
+    # Create a debug version of the query with parameters substituted
+    debug_query = substitute_params(TOOL_PROMPT, params)
+    if logger.getEffectiveLevel() == logging.DEBUG:
+            panel = Panel(
+                Markdown(debug_query),
+                border_style="blue",
+                title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                title_align="left",
+                expand=True,
+            )            
+            console.print(panel)
+
+    try:
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            # Display "no results" message with tool info
+            display_formatted_results(
+                "No RULAC conflict data found for the specified organizations.",
+                title="RULAC Search: No Results",
+                tool_name=tool_name,
+                tool_params=params
+            )
+            
+            # Print end marker for tool execution
+            console.print("\n[bold white]" + "="*50 + "\n" + 
+                         f"ENDING TOOL: {tool_name} (with empty result)\n" + 
+                         "="*50 + "[/bold white]\n")
+            
+            return format_standard_tool_result(
+                content="No RULAC data found.",
+                citations=[], # Empty List[Citation]
+                tool_name=tool_name,
+                tool_params=params
+            )
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Process the result data - formatting content and collecting citations in one step
+        cleanedToolMessage, citations = process_rulac_data(research_result, research_query)
+
+        # Display formatted results
+        display_formatted_results(cleanedToolMessage, title="RULAC Conflicts Involving Organizations", tool_name=tool_name, tool_params=params, citations=citations)
+
+        # Print end marker for tool execution before returning
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+
+        # Return formatted result using standardized format
+        return format_standard_tool_result(
+            content=cleanedToolMessage,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+
+    except Exception as e:
+        error_message = f"Error retrieving RULAC data: {str(e)}"
+        
+        # Display error message with tool info
+        display_formatted_results(
+            error_message,
+            title="RULAC Search: Error",
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution on error
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+
+
+
+@tool
+async def retreive_RULAC_conflict_data_by_region(
+    research_query: str,
+    target_region_UN_M49_codes: List,
+    target_conflict_types: List,
+) -> RULAC_TOOL_RESULT:
+    """
+    Retreives conflict data from RULAC (Rule of Law in Armed Conflict) on armed conflicts (International Armed Conflicts (IAC), Non-International Armed Conflicts (NIAC), and Military Occupations) taking place in specific regions of the world.
+    
+    Conflict data returned includes: conflict name, historical conflict overview, applicable international humanitarian law, conflict classification, and a list of state actors and non-state actors to the conflict.
+
+    This tool retreives all conflicts in a region by default, but can also use an optional filter by conflict classification type. Note: There are only three valid conflict classifications, as defined by RULAC: "International Armed Conflict (IAC)", "Non-International Armed Conflict (NIAC)", "Military Occupation".
+
+    ## Steps
+    1. Identify the most relevant research_query from the user query
+    2. Identify the region(s) to retrieve conflict data for
+    3. Identify any conflict classification filters to apply, if requested. If there are no conflict classification filters to apply, return an empty [] for target_conflict_types
+
+
+    
+#### Official UN M49 Geo Regions and codes
+Regions
+  ├── Africa (002)
+  │   ├── Northern Africa / North Africa (015)
+  │   ├── Sub-Saharan Africa (202)
+  │   │   ├── Eastern Africa / East Africa (014)
+  │   │   ├── Middle Africa (017)
+  │   │   ├── Southern Africa (018)
+  │   │   └── Western Africa / West Africa (011)
+  ├── Americas (019)
+  │   │   ├── Northern America (021)
+  │   │   ├── Caribbean (029)
+  │   │   └── Central America (013)
+  │   └── Latin America / Latin America and the Caribbean (419)
+  │       ├── Caribbean (029)
+  │       ├── Central America (013)
+  │       └── South America (005)
+  ├── Antarctica (010)
+  ├── Asia (142)
+  │   ├── Central Asia (143)
+  │   ├── Eastern Asia / East Asia (030)
+  │   ├── South-Eastern Asia / SouthEast Asia (035)
+  │   ├── Southern Asia (034)
+  │   └── Western Asia / West Asia (145)
+  ├── Europe (150)
+  │   ├── Eastern Europe / East Europe (151)
+  │   ├── Northern Europe / North Europe (154)
+  │   ├── Southern Europe / South Europe (039)
+  │   └── Western Europe / West Europe (155)
+  └── Oceania (009)
+
+
+    ## Example Tool Call Parameters
+    
+    query: "How does the number of conflicts taking place in Eastern Africa region compare to those in North Africa region?"
+    research_query: "Retreive RULAC conflict data for Eastern Africa and North Africa regions'"
+    target_region_UN_M49_codes: ["014", "015"]
+    target_conflict_types: []
+
+    query: "What IAC conflicts are taking place in Europe?"
+    research_query: "Retreive RULAC conflict data for conflicts classified as IAC in Europe region"
+    target_region_UN_M49_codes: ["150"]
+    target_conflict_types: ["International Armed Conflict (IAC)"]
+
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :param target_region_UN_M49_codes: List of UN_M49 Geographic Region codes
+    :param target_conflict_types: List of conflict classification types to filter by in query
+    :return: A dictionary with "result" string containing the formatted research data and "citations" list of citation objects
+    """
+    tool_name = "retreive_RULAC_conflict_data_by_region"
+    
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+    
+    try:
+        # Make sure Neo4j is connected
+        global graph
+        if graph is None:
+            # Try to initialize the connection
+            graph = initialize_neo4j(local_testing=True)
+
+        # Load tool-specific cypher template
+        TOOL_PROMPT = tool_cypher_RULAC_conflict_by_Region.PROMPT
+
+        # Prepare the parameters for the query
+        params = {
+            "target_region_UN_M49_codes": target_region_UN_M49_codes,
+            "target_conflict_types": target_conflict_types,
+            "research_query": research_query
+        }
+
+        # DEBUGGING statement
+        # Create a debug version of the query with parameters substituted
+        debug_query = substitute_params(TOOL_PROMPT, params)
+        if logger.getEffectiveLevel() == logging.DEBUG:
+                panel = Panel(
+                    Markdown(debug_query),
+                    border_style="blue",
+                    title="[TOOL DEBUGGING] Cypher Prompt dynamically compiled for NEO4J",
+                    title_align="left",
+                    expand=True,
+                )            
+                console.print(panel)
+
+        # Execute the query using the graph.query() method
+        results = graph.query(TOOL_PROMPT, params)
+        if not results:
+            # Display "no results" message with tool info
+            display_formatted_results(
+                "No RULAC conflict data found for the specified regions.",
+                title="RULAC Search: No Results",
+                tool_name=tool_name,
+                tool_params=params
+            )
+            
+            # Print end marker for tool execution
+            console.print("\n[bold white]" + "="*50 + "\n" + 
+                         f"ENDING TOOL: {tool_name} (with empty result)\n" + 
+                         "="*50 + "[/bold white]\n")
+            
+            return format_standard_tool_result(
+                content="No RULAC data found.",
+                citations=[], # Empty List[Citation]
+                tool_name=tool_name,
+                tool_params=params
+            )
+
+        # Assume the first record contains the required RULAC_research field
+        research_result = results[0].get("RULAC_research")
+
+        # Process the result data - formatting content and collecting citations in one step
+        cleanedToolMessage, citations = process_rulac_data(research_result, research_query)
+
+        # Display formatted results
+        display_formatted_results(cleanedToolMessage, title="RULAC Conflicts by Region", tool_name=tool_name, tool_params=params, citations=citations)
+
+        # Print end marker for tool execution before returning
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+                
+        # Return both the formatted result and citations
+        return format_standard_tool_result(
+            content=cleanedToolMessage,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+    except Exception as e:
+        error_message = f"Error retrieving RULAC data: {str(e)}"
+        
+        # Display error message with tool info
+        display_formatted_results(
+            error_message,
+            title="RULAC Search: Error",
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution on error
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+
+
+
+
+# TESTING SUITES
+
+# An async event emitter that prints out any events emitted by the tool.
+async def event_emitter(event):
+    print("Event emitted:", event)
+    description = event.get("data", {}).get("description", "No description available")  # Safely extract description
+        
+    panel = Panel.fit(description, style="black on yellow", border_style="yellow")
+        
+    # Print nicely formatted box to console
+    console.print(panel)
+
+# THESE TOOLS RETURN DIFFERENT DATA STRUCTURES, ie they do not include conflict details but rather a single text string
+
+@tool
+async def get_Conflict_Classification_Methodology(
+    research_query: str,
+) -> RULAC_TOOL_RESULT:
+    """
+    Retreives information about RULAC's methodology for classifying armed conflicts according to international humanitarian law.
+
+
+    Use this tool when the user wants to know how RULAC determines if a situation is an armed conflict or for general information about RULAC's conflict classification methodology.
+    Do not use this tool if the user wants to know about the specific classification of a conflict.
+    
+    :param research_query: A string containing the research query. 
+    :return: A dictionary with "result" string containing the methodology information and "citations" list of citation objects
+    """
+    tool_name = "get_Conflict_Classification_Methodology"
+    
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+    
+    try:
+        # Get content from imported prompt
+        methodology_content = baselineClassificationMethodology.PROMPT
+        
+        # Create citations
+        citations = [
+            create_standard_citation(
+                title="RULAC - Classification Methodology",
+                url="https://www.rulac.org/classification",
+                formatted_content=methodology_content
+            )
+        ]
+        
+        # Tool params for display
+        params = {
+            "research_query": research_query
+        }
+        
+        # Display formatted results
+        display_formatted_results(
+            methodology_content, 
+            title="RULAC CONFLICT CLASSIFICATION METHODOLOGY", 
+            tool_name=tool_name, 
+            tool_params=params,
+            citations=citations,
+            beacon_tool_source="RULAC",
+            showFull=True  # Show full methodology content for detailed reference
+        )
+        
+        # Format result
+        result = format_standard_tool_result(
+            content=methodology_content,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return result
+        
+    except Exception as e:
+        error_message = f"Error retrieving RULAC methodology: {str(e)}"
+        logger.error(error_message)
+        
+        # Format error result
+        error_result = format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return error_result
+
+@tool
+async def get_International_Humanitarian_Legal_Framework(
+    research_query: str,
+) -> RULAC_TOOL_RESULT:
+    """
+    Returns general information about the International Humanitarian Law (IHL) legal framework.
+    This information is retrieved from a markdown file containing essential knowledge about IHL treaties, principles, and implementation.
+
+    Use this tool when the user wants to know more about IHL, its sources, and how it applies to different conflict types.
+    Do not use this tool if the user wants to know about the specific classification of a conflict.
+    
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :return: A dictionary with "result" string containing the IHL framework information and "citations" list of citation objects
+    """
+    tool_name = "get_International_Humanitarian_Legal_Framework"
+    
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+
+    try:
+        ihl_info = baselineIHLLegalFramework.PROMPT
+        
+        # Tool params for display
+        params = {
+            "research_query": research_query
+        }
+
+        # Add citation for the IHL framework information
+        citations = [
+            create_standard_citation(
+                title="RULAC - International Humanitarian Law Framework",
+                url="https://www.rulac.org/legal-framework",
+                formatted_content=ihl_info
+            )
+        ]
+        
+        # Display formatted results with a custom title
+        display_formatted_results(
+            ihl_info, 
+            title="INTERNATIONAL HUMANITARIAN LAW LEGAL FRAMEWORK", 
+            tool_name=tool_name, 
+            tool_params=params,
+            citations=citations
+        )
+                
+        # Print end marker for tool execution before returning
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+
+        # Format standardized result
+        result = format_standard_tool_result(
+            content=ihl_info,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        return result
+        
+    except Exception as e:
+        error_message = f"Error retrieving IHL framework data: {str(e)}"
+        
+        # Format error result
+        error_result = format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution on error
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return error_result
+
+
+
+@tool
+async def getBaselineRULACinformation(
+    research_query: str,
+) -> RULAC_TOOL_RESULT:
+    """
+    Returns general information about the Rule of Law in Armed Conflicts (RULAC) project.
+    This information is retrieved from a markdown file containing essential knowledge about RULAC.
+
+    Use this tool when the user asks for general information about RULAC.
+
+    :param research_query: A string containing the research query to retrieve RULAC conflict data. This should be a clear description of what conflict data is being requested.
+    :return: A dictionary with "result" string containing the baseline RULAC information and "citations" list of citation objects
+    """
+    tool_name = "getBaselineRULACinformation"
+    
+    # Print start marker for tool execution
+    console.print("\n[bold white]" + "="*50 + "\n" + 
+                 f"STARTING TOOL: {tool_name}\n" + 
+                 "="*50 + "[/bold white]\n")
+    
+    try:
+        baseline_info = baselineRULACinfo.PROMPT
+        
+        # Tool params for display
+        params = {
+            "research_query": research_query
+        }
+
+        # Create citation for the baseline information
+        citations = [
+            create_standard_citation(
+                title="RULAC - About Rule of Law in Armed Conflicts Project",
+                url="https://www.rulac.org/about",
+                formatted_content=baseline_info
+            )
+        ]
+        
+        # Display formatted results with a custom title
+        display_formatted_results(
+            baseline_info, 
+            title="RULAC BASELINE INFORMATION", 
+            tool_name=tool_name, 
+            tool_params=params,
+            citations=citations
+        )
+        
+        # Format standardized result
+        result = format_standard_tool_result(
+            content=baseline_info,
+            citations=citations,
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution before returning
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (success)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return result
+        
+    except Exception as e:
+        error_message = f"Error retrieving RULAC baseline information: {str(e)}"
+        
+        # Format error result
+        error_result = format_standard_tool_result(
+            content=error_message,
+            citations=[],
+            tool_name=tool_name,
+            tool_params=params
+        )
+        
+        # Print end marker for tool execution on error
+        console.print("\n[bold white]" + "="*50 + "\n" + 
+                     f"ENDING TOOL: {tool_name} (with error)\n" + 
+                     "="*50 + "[/bold white]\n")
+        
+        return error_result
+
+
+def emit_status(message, status_type="info"):
+    """
+    Emit a status message using console.print.
+    
+    Args:
+        message: The status message to emit
+        status_type: The type of status message (info, error, etc.)
+    """
+    if status_type == "error":
+        console.print(Panel(message, style="white on red", border_style="red"))
+    elif status_type == "success":
+        console.print(Panel(message, style="black on green", border_style="green"))
+    else:
+        console.print(Panel(message, style="black on yellow", border_style="yellow"))
+
+
+async def run_tests():
+    """
+    Run all test functions for RULAC tools using the standardized test approach.
+    This centralizes all test configuration in one place.
+    """
+    console.print(Panel("[bold]STARTING RULAC TOOLS TESTS[/]", style="bold white on green", border_style="green"))
+    
+    # Test Scenario Definitions
+    state_actor_scenarios = [
+        {
+            "name": "State Actor: France (IAC Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC IAC conflict data for France",
+                "target_state_actor_UN_M49_codes": ["250"],
+                "target_conflict_types": ["International Armed Conflict (IAC)"],
+            },
+        },
+        {
+            "name": "State Actor: USA (No Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for USA",
+                "target_state_actor_UN_M49_codes": ["840"],
+                "target_conflict_types": [],
+            },
+        },
+    ]
+    
+    non_state_actor_scenarios = [
+        {
+            "name": "Non-State Actor: Hezbollah",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for Hezbollah",
+                "target_non_state_actor_name_and_aliases": [
+                    "Hezbollah", "Hizbollah", "Hizbullah", "Hizballah", "Party of God"
+                ],
+            },
+        },
+    ]
+    
+    country_scenarios = [
+        {
+            "name": "Country: Ukraine (No Filter)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict taking place in Ukraine",
+                "target_country_UN_M49_codes": ["804"],
+                "target_conflict_types": [],
+            },
+        },
+    ]
+    
+    organization_scenarios = [
+        {
+            "name": "Organization: BRICS",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for BRICS members",
+                "target_organization_name": ["BRICS"],
+                "target_conflict_types": ["International Armed Conflict (IAC)"],
+            },
+        },
+    ]
+    
+    region_scenarios = [
+        {
+            "name": "Region: Eastern Africa (No Filters)",
+            "params": {
+                "research_query": "Retrieve RULAC conflict data for Eastern Africa region",
+                "target_region_UN_M49_codes": ["014"],
+                "target_conflict_types": [],
+            },
+        },
+    ]
+    
+    methodology_scenarios = [
+        {
+            "name": "Classification Methodology Request",
+            "params": {
+                "research_query": "How does RULAC classify conflicts?",
+            },
+        },
+    ]
+    
+    ihl_framework_scenarios = [
+        {
+            "name": "IHL Framework Request",
+            "params": {
+                "research_query": "What is international humanitarian law?",
+            },
+        },
+    ]
+    
+    baseline_info_scenarios = [
+        {
+            "name": "Basic Information Request",
+            "params": {
+                "research_query": "What is RULAC?",
+            },
+        },
+    ]
+    
+    # Run tests based on user configuration
+    # Uncomment which tests you want to run
+    
+    # Neo4j-based tool tests
+    await standardized_tool_test(
+        retreive_RULAC_conflict_data_by_state_actor_involvement,
+        state_actor_scenarios,
+        "Testing RULAC State Actor Involvement"
+    )
+
+    await standardized_tool_test(
+        retreive_RULAC_conflict_data_by_non_state_actor_involvement,
+        non_state_actor_scenarios,
+        "Testing RULAC Non-State Actor Involvement"
+    )
+    
+    await standardized_tool_test(
+        retreive_RULAC_conflict_data_by_conflict_taking_place_in_country,
+        country_scenarios,
+        "Testing RULAC Country Involvement"
+    )
+
+    await standardized_tool_test(
+        retreive_RULAC_conflict_data_by_organization,
+        organization_scenarios,
+        "Testing RULAC Organization Involvement"
+    )
+
+    await standardized_tool_test(
+        retreive_RULAC_conflict_data_by_region,
+        region_scenarios,
+        "Testing RULAC Region Involvement"
+    )
+
+    await standardized_tool_test(
+        get_Conflict_Classification_Methodology,
+        methodology_scenarios,
+        "Testing RULAC Conflict Classification Methodology"
+    )
+
+    await standardized_tool_test(
+        get_International_Humanitarian_Legal_Framework,
+        ihl_framework_scenarios,
+        "Testing RULAC International Humanitarian Legal Framework"
+    )
+
+    await standardized_tool_test(
+        getBaselineRULACinformation,
+        baseline_info_scenarios,
+        "Testing RULAC Baseline Information"
+    )       
+    
+    
+    
+    console.print(Panel("[bold]ALL TESTS COMPLETED[/]", style="bold white on green", border_style="green"))
+
+
+if __name__ == "__main__":
+    import asyncio
+    
+    # Run the async test function
+    asyncio.run(run_tests())

@@ -1,0 +1,60 @@
+PROMPT = """### RULAC classification of armed conflicts
+
+The classification of situations of armed violence pursuant to international humanitarian law criteria has important consequences in the international legal system. In particular, states involved in armed conflicts will have rights and duties that do not exist outside an armed conflict.
+
+International humanitarian law distinguishes between two categories of armed conflict: international and non-international armed conflicts. Despite contemporary challenges to the legal dichotomy between international and non-international armed conflicts, there is no other category of armed conflict under international humanitarian law.
+
+#### The distinction between international and non-international armed conflicts
+
+There is not a single definition of armed conflict under international humanitarian law. Instead, international humanitarian law distinguishes between international armed conflicts and armed conflicts 'not of an international character.' Military occupations are a particular form of international armed conflict.
+
+Pursuant to a widely accepted general definition of the Appeals Chamber of the International Criminal Tribunal for the former Yuogslavia, 'an armed conflict exists whenever there is a resort to armed force between States or protracted armed violence between governmental authorities and organized armed groups or between such groups within a State.' In other words, there is an international armed conflict whenever there is a resort to armed force between states, regardless of the intensity of such force. In contrast, for a non-international armed conflict to exist, two cumulative criteria must be fulfilled. First, there must be 'protracted armed violence' in the sense that a certain threshold of armed violence has been reached in terms of intensity. Second, at least one side to the conflict is an organized armed group. The distinction between international and non-international armed conflict is thus based on two factors:
+
+    - The structure and status of the parties involved is different. International armed conflicts involve sovereign states. In contrast, non-international armed conflicts involve states and organized armed groups.
+    - The threshold of the intensity of violence is different. The level of violence required to trigger an international armed conflict is significantly lower than that necessary to constitute a non-international armed conflict.
+
+The criteria of the threshold of violence and the degree of organization of the armed group distinguish situations of non-international armed conflicts from situations of internal disturbances, riots, terrorism, or high criminality that are not subject to international humanitarian law. If the threshold or organization criteria are not fulfilled, the situation does not amount to a non-international armed conflict.
+
+From a humanitarian law perspective, there is no other category of armed conflict.
+
+Many contemporary armed conflicts appear to not fit well into either one or the other category because they combine elements of traditional non-international armed conflicts within a single state with international interventions to a varying degree and in various forms or spill over into other states' territories. Such challenges to contemporary conflict classification relate to the fragmentation of armed conflicts, the relevance of consent, the targeting of non-state armed actors abroad, the use of proxy forces and interventions by foreign forces, including multinational forces.
+
+While one may attempt to distinguish between new types or typologies of armed conflict, such categories are descriptive and do not carry any legal significance: for the purposes of international humanitarian law, each situation has to be qualified as an international or non-international armed conflict. Similarly, while some question the legal dichotomy between international and non-international humanitarian law, there are no other categories of armed conflict under international humanitarian law. As a consequence, these two categories accommodate a broad range of situations, ranging from asymmetric contexts where one side may only intervene from the air and deploy advanced technology and weapons to situations featuring many multiplying and fragmenting non-state armed groups. The RULAC project follows this approach and distinguishes between international and non-international armed conflicts, but not between other types of conflicts. However, it is possible that there are parallel international and non-international armed conflicts taking place in the same state.
+
+#### Classification based on legal criteria and facts
+
+The classification of situations of armed violence is fraught with difficulties. Some governments deny that they are involved in armed conflicts, arguing that they are engaged in counter-terrorism operations not governed by international humanitarian law. Others apply international humanitarian law to situations that do not amount to an armed conflict. The main reason for doing so is because the rules governing use of force and detention of individuals for security reasons are generally less restrictive under international humanitarian law than under international human rights law. Non-state armed groups may exaggerate the level of violence or their degree of organization.
+
+Yet, the question whether or not there is an international or non-international armed conflict depends on the factual circumstances in light of the relevant legal criteria that are described in the classification section. The subjective views of the parties may be an indicator to be taken into account, but are not determinative. In this sense, the classification of a situation is objective: it is a determination based on facts in light of relevant legal criteria and does not depend on the subjective will of the parties to a conflict. The facts determine whether or not there is a situation of armed conflict. Various actors may take a different view of the same facts and arrive at different conclusions.
+
+Contemporary armed conflicts are increasingly complex due to the multitude of state and non-state parties involved in different forms and to varying degrees. As further explained in the section on contemporary challenges, the classification of such situations is also subject to debate from the perspective of international humanitarian law. Any classification exercise thus involves certain methodological choices, which, for the RULAC project, are explained in the classification section. Other actors who make different methodological choices may arrive at different classifications.
+
+#### Why classify? The consequences of classification
+
+While different definitions of armed conflict may be used for different purposes, the question whether or not a situation of armed violence amounts to an armed conflict under international humanitarian law carries important consequences in the international legal system.
+
+First, the existence of an armed conflict renders international humanitarian law applicable: international humanitarian law applies during times of armed conflict. If there is no armed conflict in the sense of international humanitarian law, states must apply international human rights law.
+
+Based on a criminal justice and law enforcement paradigm, international human rights law is more restrictive than international humanitarian law, in particular in relation to the use of force against individuals and the detention of individuals for security reasons. In other words, classification serves to identify the applicable legal regime, which, in turn, helps to identify the applicable substantive rules. For example, discussions on the legality of the targeted killings of individuals by drone strikes routinely start with the identification of the applicable regime, international humanitarian law or international human rights law.
+
+International humanitarian law also imposes duties on states that do not exist outside armed conflict. In particular, international humanitarian law provides rules for the provision of humanitarian relief, including an obligation to 'allow and facilitate rapid and unimpeded passage of humanitarian relief for civilians in need, which is impartial in character and conducted without any adverse distinction, subject to their right of control.' There is no corresponding obligation outside international humanitarian law.
+
+In addition to substantive differences, the scope of application of international humanitarian law and international human rights law is different. International humanitarian law binds all parties to an armed conflict, including non-state armed groups. In contrast, there are on going discussions whether and under what circumstances international human rights law applies to non-state armed groups.
+
+Second, in terms of accountability, serious violations of international humanitarian law are criminalized as war crimes. War crimes may only be committed in connection with an armed conflict. In contrast, relatively few human rights treaties require criminalization of serious human rights violations.
+
+Third, the existence of an international armed conflict may trigger the law of neutrality, affect the operation of international treaties, and be relevant for arms control treaties.
+
+#### Why distinguish between international and non-international armed conflicts?
+
+The distinction between international and non-international armed conflict matters for several reasons.
+
+On the one hand, there is no generic category of armed conflict under international humanitarian law, but two discrete categories, i.e. international and non-international armed conflicts. These categories are based on different criteria to assess whether or not a given situation amounts to an international or non-international armed conflict. In other words, every classification of a situation of armed violence for international humanitarian law purposes invariably requires the distinction between international and non-international armed conflicts.
+
+Second, despite the convergence in the legal regime governing international and non-international armed conflicts under customary international humanitarian law, there remain important differences. Generally, the rules governing non-international armed conflicts are less detailed than those governing international armed conflicts.
+
+Most notably, there are important differences in terms of status. During international armed conflicts, international humanitarian law formally recognizes the status of combatants, civilians, and other persons who are hors de combat, namely the wounded, sick and shipwrecked, and prisoners of war. These are technical terms in international humanitarian law, defined for its purposes. Civilians and persons hors de combat are granted special protection under the four 1949 Geneva Conventions. There is no equivalent special protection regime based on status during non-international armed conflicts.
+
+In addition, combatant status carries two important consequences: First, combatants are immune from criminal prosecution for belligerent acts they commit that comply with international humanitarian law: They enjoy so-called combatant immunity or privilege. Second, combatants are entitled to prisoner of war status if they fall into the hands of the enemy. Due to the absence of combatant status for members of non-state armed groups during non-international armed conflicts, they may be punishend for the mere fact of taking up arms or for acts that are potentially lawful under international humanitarian law.
+
+Finally, the Statute of the International Criminal Court also distinguishes between war crimes committed during international armed conflict and those during non-international armed conflicts. While there is substantial overlap between the two, there are also differences. For example, starvation as a method of warfare is only listed as a war crime during an international armed conflict.""" 

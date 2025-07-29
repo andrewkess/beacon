@@ -1,0 +1,441 @@
+[
+    {
+        "category": "1. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving a single State Actor",
+        "questions": [
+          "What conflicts is the state actor France involved in?",
+          "What conflicts is France involved in?",
+          "How many conflicts is France actively engaged in?",
+          "Is the country France involved in any conflict?   ",
+          "Is France a party to conflict?",
+          "Which conflicts is France involved in as a state party ?",
+          "How many conflicts is France involved in? What are their names?",
+          "What conflicts is France currently participating in as a state actor?",
+          "How many conflicts is France involved in, and what are their classifications?",
+          "Has France been involved in any armed conflicts?",
+          "Which conflicts has France participated in as a state party, and who are the opposing actors?",
+          "Has France been engaged in any recognized armed conflicts in recent years?",
+          "What are the legal classifications of conflicts involving France as a state actor?",
+          "What IHL applies to the conflicts involving France as a state actor  ?",
+          "How to classify France's conflicts or conflicts involving France?",
+          "What is the classification of conflicts involving the state actor France?",
+          "Which IHL provisions apply to conflicts involving France  ?",
+          "How does international humanitarian law classify conflicts involving France as a state actor?",
+          "Which international treaties govern the conflicts involving the state actor France, i.e IHL law?",
+          "What legal frameworks apply to conflicts involving France as a state actor? And what is today's date?"
+        ]
+      },
+      {
+        "category": "2. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving a single State Actor WITH conflict classification FILTER",
+        "questions": [
+          "What IAC conflicts is the state actor France involved in?",
+          "What NIAC conflicts is the state actor France involved in?",
+          "What military occupations is the state actor France involved in?",
+          "What IAC and NIAC conflicts is the state actor France involved in?",
+          "What NIAC or IAC conflicts is France involved in?",
+          "How many NIACs is France actively engaged in?",
+          "Is the country France involved in any NIAC conflict?",
+          "Is France a party to any NIACs?",
+          "Which non-international armed conflicts is France involved in as a   state party?",
+          "How many non-international armed conflicts is France involved in? What are their names?",
+          "What non-international armed conflicts is France currently participating in as a state actor?",
+          "How many NIACs is France involved in, and what are their classifications?",
+          "Has France been involved in any NIAC conflicts?",
+          "Which NIACs has France participated in as a state party, and who are the opposing actors?",
+          "Has France been engaged in any recognized NIACs conflicts in recent years?",
+          "What are the legal classifications of NIAC conflicts involving France as a state actor?",
+          "What IHL applies to the NIACs involving France as a state  actor?",
+          "Which IHL provisions apply to NIACs involving France?",
+          "How does international humanitarian law classify NIACs involving France as a state actor?",
+          "Which international treaties govern the NIACs involving  the state actor France, i.e IHL law?",
+          "What legal frameworks apply to NIACS involving France as a state actor?"
+        ]
+      },
+      {
+        "category": "3. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving MULTIPLE State Actor",
+        "questions": [
+          "What conflicts is the state actor France and USA involved in?",
+          "What conflicts is France and USA involved in?",
+          "How many conflicts is France and USA actively engaged in?",
+          "Is the country France or USA involved in any conflict?",
+          "Is France or USA a party to conflict?",
+          "Which conflicts is France and USA involved in as a state party ?",
+          "How many conflicts is France or USA involved in? What are their names?",
+          "What conflicts is France or USA currently participating in as a state actor?",
+          "How many conflicts is France or USA involved in, and what are their  classifications?",
+          "Has France or USA been involved in any armed conflicts?",
+          "Which conflicts has France or USA participated in as a state party, and who are the  opposing actors?",
+          "Has France or USA been engaged in any recognized armed conflicts in recent years?",
+          "What are the legal classifications of conflicts involving France or USA as a state actor?",
+          "What IHL applies to the conflicts involving France and/or USA as a state actor?",
+          "How to classify France and or USA's conflicts?",
+          "What is the classification of conflicts involving the state actor France or USA?",
+          "Which IHL provisions apply to conflicts involving France or USA?",
+          "How does international humanitarian law classify conflicts involving France  or USA as a state actor?",
+          "Which international treaties govern the conflicts involving the state actor France or USA, i.e IHL law?",
+          "What legal frameworks apply to conflicts involving France or USA as a state actor?"
+        ]
+      },
+      {
+        "category": "4. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving MULTIPLE State Actors WITH conflict classification FILTER",
+        "questions": [
+          "What IAC conflicts is the state actor France or Afghanistan involved in?",
+          "What NIAC conflicts is the state actor France or Afghanistan involved in?",
+          "What military occupations is the state actor France or Afghanistan involved in?",
+          "What IAC and NIAC conflicts is the state actor France or Afghanistan involved in?",
+          "What NIAC or IAC conflicts is France or Afghanistan involved in?",
+          "How many NIACs is France or Afghanistan actively engaged in?",
+          "Is the country France or Afghanistan involved in any NIAC  conflict?",
+          "Is France or Afghanistan a party to any NIACs?",
+          "Which non-international armed conflicts is France or Afghanistan involved in as a state party?",
+          "How many non-international armed conflicts is France or Afghanistan involved in? What are their names?",
+          "What non-international armed conflicts is France or Afghanistan currently participating in as a state actor?",
+          "How many NIACs is France or Afghanistan involved in,  and what are their classifications?",
+          "Has France or Afghanistan been involved in any NIAC conflicts?",
+          "Which NIACs has France or Afghanistan participated in as a state party, and who are the opposing actors?",
+          "Has France or Afghanistan been engaged in any recognized NIACs conflicts  in recent years?",
+          "What are the legal classifications of NIAC conflicts involving France or Afghanistan as a state actor?",
+          "What IHL applies to the NIACs involving France or Afghanistan as a state actor?",
+          "Which IHL provisions apply to NIACs involving France or Afghanistan?",
+          "How does international humanitarian law classify NIACs involving France or Afghanistan as a state actor?",
+          "Which international treaties govern the NIACs involving the state actor France or Afghanistan, i.e IHL law?",
+          "What legal frameworks apply to NIACS involving France or Afghanistan as a state actor?"
+        ]
+      },
+      {
+        "category": "5. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) Involving MULTIPLE State Actors for COMPARING multiple state actors",
+        "questions": [
+            "Are there more conflicts involving France or India as state actors?",
+            "Has France or the UK been involved in more armed conflicts?",
+            "Is USA or mother Russia involved in more armed conflicts?",
+            "Do the conflicts involving Iran outnumber those involving Saudi Arabia?",
+            "Are there more conflicts involving Israel or Palestine as a party to the conflict?",
+            "How does the number of conflicts involving France compare to those involving Saudia Arabia?",
+            "Have more armed conflicts involved Russia or state actor Ukraine since 2014?",
+            "Which state has been involved in more NIACs — Ethiopia or Sudan?",
+            "Has state actor Pakistan or India engaged in more internationally  recognized armed conflicts?",
+            "Are there more conflicts involving Nigeria or the  DRC?",
+            "Which state actor has been involved in more cross-border military operations—Turkey or is it Iran?",
+            "Have more conflicts involved Colombia or Venezuela in the past three decades?",
+            "Which state actor has participated in more military occupations— Israel or Russia?",
+            "Do conflicts involving  North Korea outnumber those involving South Korea?",
+            "How does the number of conflicts involving  Egypt compare to those involving Libya?"        
+        ]
+    },
+
+      
+
+
+
+
+    {
+      "category": "6. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in a single Country",
+        "questions": [
+          "What conflicts are taking place in Ukraine?",
+          "How many conflicts are taking place in Ukraine?",
+          "Are there any conflicts taking place in Ukraine?",
+          "Which conflicts are taking place in Ukraine  ?",
+          "What is the IHL that applies to the conflicts taking place in Ukraine?",
+          "What are the classifications of the conflicts taking place in Ukraine?",
+          "What is the legal framework involving the conflicts taking place in Ukraine?"
+        ]
+    },    
+      {
+        "category": "7. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in a single Country WITH conflict classification FILTER",
+        "questions": [
+          "What IAC conflicts are taking place in Ukraine?",
+          "What NIAC conflicts are taking place in Ukraine?",
+          "What military occupations are taking place in Ukraine?",
+          "What IAC and NIAC conflicts are taking place in Ukraine?",
+          "How many NIACs are taking place in Ukraine?",
+          "Which non-international armed conflicts are taking place in Ukraine?",
+          "How many non-international armed conflicts are taking   place in Ukraine? What are their names?",
+          "Which IACs are taking place in Ukraine, and who are the   opposing actors?",
+          "What are the legal classifications of NIAC conflicts taking place in Ukraine?",
+          "What IHL applies to the IACs taking place in Ukraine?",
+          "Which IHL provisions apply to IACs inside Ukraine?",
+          "How does international humanitarian law classify conflicts in Ukraine?",
+          "Which international treaties govern the NIACs taking place in Ukraine, i.e IHL law?",
+          "What legal frameworks apply to NIACS taking place in Ukraine?"
+        ]
+      },
+
+    {
+        "category": "8. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in a MULTIPLE CountrIES",
+        "questions": [
+          "What conflicts are taking place in Ukraine or Somalia?",
+          "How many conflicts are taking place in Ukraine or Somalia?",
+          "Are there any conflicts taking place in Ukraine or Somalia?",
+          "Which conflicts are taking place in Ukraine or Somalia?",
+          "What is the IHL that applies to the conflicts  taking place in Ukraine or Somalia?",
+          "What are the classifications of the conflicts taking place in Ukraine or Somalia?",
+          "What is the legal framework involving the  conflicts taking place in Ukraine or Somalia?"
+        ]
+      },
+
+      {
+        "category": "9. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in MULTIPLE COUNTRIES WITH conflict classification FILTER",
+        "questions": [
+          "What IAC conflicts are taking place in Ukraine or Somalia?",
+          "What NIAC conflicts are taking place in Ukraine or Somalia?",
+          "What military occupations are taking place in Ukraine or Somalia?",
+          "What IAC and NIAC conflicts are taking place in Ukraine or Somalia?",
+          "How many NIACs are taking place in Ukraine or Somalia?",
+          "Which non-international armed conflicts are taking place in Ukraine or Somalia?",
+          "How many non-international armed conflicts are  taking place in Russia or USA? What are their names?",
+          "Which IACs are taking place in Russia or USA, and who are the opposing actors?",
+          "What are the legal classifications of NIAC conflicts taking place in Russia or USA?",
+          "What IHL applies to the IACs that are taking place in Russia or in USA?",
+          "Which IHL provisions apply to IACs inside the countries: Russia and USA?",
+          "How does international humanitarian law classify  conflicts taking place in Russia or USA?",
+          "What legal frameworks apply to IACS taking place in Russia or USA?"
+        ]
+      },
+      {
+        "category": "10. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in MULTIPLE Countries for COMPARING multiple countries",
+        "questions": [
+            "Are there more conflicts taking place in France or India?",
+            "Do the conflicts taking place in Iran outnumber those taking place in Saudi Arabia?",
+            "Are there more conflicts taking place in Israel or Palestine?",
+            "How does the number of conflicts taking place in France compare to those taking place in Saudia Arabia?",
+            "Have more conflicts taken place geographically in  Russia or Ukraine?",
+            "Which country has more NIACs taking place —  Ethiopia or Sudan?",
+            "Are there more conflicts taking place in  Nigeria or the DRC?",
+            "Have more conflicts taken place in Colombia or Venezuela in the past three decades?",
+            "Do conflicts taking place in North Korea outnumber those taking place in South Korea?",
+            "How does the number of conflicts taking place in   Egypt compare to those in Libya?"        
+        ]
+    },
+
+
+
+
+
+
+
+
+    {
+      "category": "11. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in a single GEOREGION",
+        "questions": [
+          "What conflicts are taking place in Europe?",
+          "How many conflicts are taking place in Europe?",
+          "Are there any conflicts taking place in  Europe?",
+          "Which conflicts are taking place in Eastern Europe?",
+          "What IHL applies to the conflicts taking place in Eastern Europe region?",
+          "What are the classifications of the conflicts taking place in Asia?",
+          "What is the legal framework involving the conflicts taking place in Latin America?"
+        ]
+    },    
+      {
+        "category": "12. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in a single GEOREGION WITH conflict classification FILTER",
+        "questions": [
+          "What IAC conflicts are taking place in   Europe?",
+          "What NIAC conflicts are taking place in Europe?",
+          "What military occupations are taking place in Europe?",
+          "What IAC and NIAC conflicts are taking place in Europe?",
+          "How many NIACs are taking place in Africa?",
+          "Which non-international armed conflicts are taking place in Africa?",
+          "How many non-international armed conflicts are taking place in Africa? What are their names?",
+          "Which IACs are taking place in Europe, and who are the opposing actors?",
+          "What are the legal classifications of  NIAC conflicts taking place in Europe?",
+          "What IHL applies to the IACs taking   place in Europe?",
+          "Which IHL provisions apply to IACs inside Europe?",
+          "How does international humanitarian law classify conflicts in Europe?",
+          "Which international treaties govern the NIACs taking place in Europe, i.e IHL law?",
+          "What legal frameworks apply to NIACS taking place in Africa?"
+        ]
+      },
+
+    {
+        "category": "13. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in a MULTIPLE REGIONS",
+        "questions": [
+          "What conflicts are taking place in South America or North America?",
+          "How many conflicts are taking place in Asia or North America?",
+          "Are there any conflicts taking place in South America or North America?",
+          "Which conflicts are taking place in  Middle Africa or Caribbean?",
+          "What is the IHL that applies to the conflicts taking place in Europe or North Africa?",
+          "What are the classifications of the conflicts  taking place in Europe or North Africa?",
+          "What is the legal framework involving the conflicts taking place in Europe or North Africa?"
+        ]
+      },
+
+      {
+        "category": "14. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in MULTIPLE GEOREGIONS WITH conflict classification FILTER",
+        "questions": [
+          "What IAC conflicts are taking place in Europe or North Africa?",
+          "What NIAC conflicts are taking place in Europe or North Africa?",
+          "What military occupations are taking place in Europe or North Africa?",
+          "What IAC and NIAC conflicts are taking place in Europe or North Africa?",
+          "How many NIACs are taking place in Eastern Africa or North Africa?",
+          "Which non-international armed conflicts are taking place in Eastern Africa or North Africa?",
+          "How many non-international armed conflicts are taking place in Eastern Africa or North Africa? What are their names?",
+          "Which IACs are taking place in Eastern Africa or  North Africa, and who are the opposing actors?",
+          "What are the legal classifications of NIAC conflicts taking place in Eastern Africa or North Africa?",
+          "What IHL applies to the IACs taking place in Eastern Africa or North Africa?",
+          "Which IHL provisions apply to IACs inside Eastern Africa or North Africa?",
+          "How does international humanitarian law classify  conflicts in Eastern Africa or North Africa?",
+          "Which international treaties govern the NIACs taking place in Eastern Africa and North Africa regions, i.e IHL law?",
+          "What legal frameworks apply to NIACS taking place in Eastern Africa or North Africa regions?"
+        ]
+      },
+      {
+        "category": "15. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in MULTIPLE GEOREGIONs for COMPARING multiple GEOREGIONs",
+        "questions": [
+            "Are there more conflicts taking place in Eastern Africa or North Africa?",
+            "Do the conflicts taking place in Eastern  Africa outnumber those taking place in North Africa?",
+            "Are there more conflicts taking place in Eastern Africa or North Africa?",
+            "How does the number of conflicts taking place in  Eastern Africa compare to those taking place in Northern Africa?",
+            "Have more conflicts taken place geographically in Eastern Africa or North Africa?",
+            "Which region has more NIACs taking place — Eastern Africa or North Africa?",
+            "Are there more conflicts taking place in Eastern Africa or North Africa?",
+            "Do conflicts taking place in Eastern Africa region outnumber those taking place in North Africa?",
+            "How does the number of conflicts taking place in  Eastern Africa region compare to those in North Africa region?"        
+        ]
+    },
+
+
+
+    {
+      "category": "16. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflict(s) TAKING PLACE in a single SPECIAL REGION and by TYPE and several special regions (COMBO)",
+        "questions": [
+          "What conflicts are taking place in the Sahel region?",
+          "What NIAC conflicts are taking place in the Sahel  region?",
+          "How many NIAC conflicts are taking place in Great Lakes Region?",
+          "Are there any conflicts taking place in  Horn of Africa region?",
+          "Which conflicts are taking place in   Baltic states?",
+          "What IHL applies to the NIACS taking place in Sahel region?",
+          "What are the classifications of the NIAC and IAC conflicts taking place in Sahel region?",
+          "What is the legal framework involving the conflicts taking place in Sahel region?",
+          "What conflicts are taking place in Sahel and   Great Lakes region?"
+
+        ]
+    },    
+
+
+    {
+      "category": "17. Conflict Data (name, classification, overview, applicable IHL, parties) for Conflicts Involving International or Regional Political Organizations",
+"questions": [
+             "What conflicts involve state actors from the European Union?",
+             "What conflicts are taking place in countries from the European Union?",
+
+             "How many conflicts involve African Union member states?",
+             "What conflicts are taking place in countries from the AU organization?",
+
+             "What conflicts are NATO countries currently involved in?",
+            "What conflicts involve BRICS countries as state actors?",
+            "Are there  conflicts where ASEAN countries have played a major role?",
+            "Which conflicts have involved members of the G7?",
+            "Which conflicts have involved members of the OECD?",
+            "can u give me  breakdown of eu involvement in conflict",
+            "What conflicts involve EU?",
+            "How many active conflicts currently involve EU member states?",
+                "How many non-international armed conflicts involve BRICS member states?",
+                "How many non-international armed conflicts are taking place in BRICS member countries?",
+                "What armed conflicts are taking place in BRICS member countries?",
+                "How many armed conflicts involve African Union?"
+
+
+        ]
+    },    
+
+   
+   
+   
+    {
+      "category": "18. Conflict lookup by non-state actor",
+      "questions": [
+        "how many NIAC conflicts involve libya?",
+        "How many conflicts has Hezbollah been involved in, and who are the opposing parties?",
+        "In which countries is Boko Haram currently active, and what are the applicable IHL frameworks?",
+        "Which ongoing conflicts involve ISIS ?",
+        "In which countries is Boko currently active, and what are the applicable IHL frameworks?",
+        "What are the main conflicts linked to the Revolutionary Armed Forces of Colombia (FARC), and how have they evolved?",
+        "Which ongoing conflicts involve Al-Shabaab?",
+        "What conflicts involve the Wagner Group, and what are their classifications?",
+
+        "Where has the Taliban been involved in NIACs?",
+        "What is the involvement of the Kurdish PKK in conflicts?",
+        "Which conflicts have seen the participation of the Islamic State (ISIS), and how has their role changed over time?",
+        "What conflicts involve the Janjaweed militia, and how have they interacted with state forces?",
+        "Which conflicts have involved the Lord's Resistance Army (LRA)?",
+        "How has Hamas been involved in conflicts, and what are the classifications of these conflicts?",
+        "Which conflicts have seen significant involvement from the Haqqani Network?",
+        "Are there any ongoing conflicts involving the Moro Islamic Liberation Front (MILF) in the Philippines?",
+        "Which conflicts have involved the Abu Sayyaf Group in Southeast Asia?",
+        "What conflicts have included non-state actors like the Mahdi in Iraq?",
+        "Are there conflicts where the Red Brigades were considered a significant armed actor?",
+        "Which conflicts have involved the National Liberation Army (ELN) in Latin America?"
+    
+      ]
+    },
+   
+
+    {
+      "category": "19. Ranking most / least global country conflict involvement across world",
+      "questions": [
+        "What Military occupations are taking place in russia, palestine or france?",
+        " What Military occupations is France, USA or Russia involved in as a state actor?",
+        "Which state actors are involved in the most conflicts in the world ?",
+        "Which state actors are party to the most conflicts in the world  ?",
+        "Which state actors are involved in the least conflicts in the world?",
+        "Which state actors are party to the least conflicts in the world ?",
+
+
+        "Which countries are the most conflicts taking place in the world?",
+        "Where are most conflicts taking place in the world?",
+
+        "Which countries are the least conflicts taking place  in the world?",
+        "Where are the least amount of conflicts taking place in the world?",
+        "Where are the fewest conflicts taking place in the world?",
+        "Which countries have the fewest  conflicts?",
+
+
+
+        "Which state actors are involved in the most IACs in the world?",
+
+        "Where are most IACs taking place  in the world?",
+
+
+
+
+
+
+  "Which five state actors have been   involved in the highest number of armed conflicts?",
+  "Which state actors are involved in  the most military occupations?",
+  "Which state actors are involved in the highest number of international armed conflicts (IACs)?",
+  "Which state actors are involved in  the highest number of non-international armed conflicts (NIACs)?",
+
+  "Which countries have the highest number of international armed conflicts (IACs) taking place?",
+  "Which countries have the highest number of non-international armed conflicts (NIACs) taking place?",
+
+"are there any niacs in phillipines?"
+
+      ]
+  },
+   
+   
+    {
+        "category": "20. Ranking most /least global country conflict involvement across organization",
+        "questions": [
+            "Which European Union state actors / member countries have been party to the fewest conflicts?",
+            "Which European Union state actors / member countries have been party to the most conflicts?",
+            "Which AU state members  have been party to the most conflicts?",
+            "Which OECD state actors / member countries have been party to the most conflicts?",
+            "Which BRICS state actors have been involved in the highest number of conflicts?",
+            "Which ASEAN state actors /  members have been involved in the least number of conflicts?",
+            "Which African Union state actors  have been involved in the highest number of non-international armed conflicts (NIACs)?",
+            "Which G7 organization state actors  have been directly involved in military occupations?",
+            "Which BRICS orgaanization member state actors have been engaged in military occupations or IACs?"
+        
+
+        ]
+    }   ,
+       
+         
+          {
+            "category": "15. Global counts by conflict type",
+            "questions": [
+                "How many conflicts are  classified as occupations and/or IACs worldwide?",
+                "Where are IACs taking place in the world ?"
+            ]
+          }         
+]
