@@ -208,9 +208,9 @@ class Pipe:
     # Setup user-configurable Valves providing API keys and access
     class Valves(BaseModel):
      
-        groq_api_key: str = Field("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", description="API key for Groq")
-        mistral_api_key: str = Field("9hblEwepQtzvyY9y4incc3yvApk4ArJO", description="API key for Mistral")
-        deepseek_api_key: str = Field("sk-28cf4f690b704c76b3f3c6622d7b87cd", description="API key for Deepseek")
+        groq_api_key: str = Field("", description="API key for Groq")
+        mistral_api_key: str = Field("", description="API key for Mistral")
+        deepseek_api_key: str = Field("", description="API key for Deepseek")
         
         # Web search tool parameters
         searxng_url: str = Field("http://localhost:8081/search", description="SearXNG API URL")

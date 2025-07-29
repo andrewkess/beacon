@@ -28,7 +28,7 @@ console = Console(log_path=False, width=100)
 event_console = Console(log_path=False, width=100)
 
 if "MISTRAL_API_KEY" not in os.environ:
-    os.environ["MISTRAL_API_KEY"] = "9hblEwepQtzvyY9y4incc3yvApk4ArJO"
+    os.environ["MISTRAL_API_KEY"] = ""
 
 # Configure logging
 logger = logging.getLogger("Beacon")
@@ -386,7 +386,7 @@ async def get_conflict_classification_and_IHL_law_research(query, pipeSelf=None,
     #             # model="llama-3.1-8b-instant",
 
     #             temperature=0, 
-    #             api_key="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",
+    #             api_key="",
     #         )
 
 
