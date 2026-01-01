@@ -77,8 +77,8 @@ try:
     from prompts.final_prompts import final_argos_base_model_prompt
     from prompts.final_prompts import final_tool_prompt
 
-    # Import our new Router from agents folder
-    from agents.router import Router, RouterResponse
+    # Router removed - all queries go directly to tool agent
+    # from agents.router import Router, RouterResponse
 
 except Exception as e:
     print("DEBUG: Error importing public files:", e)
@@ -348,6 +348,45 @@ class Pipe:
             if not self.brave_search_api_key:
                 self.brave_search_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
 
+    def _initialize_llm_clients(self):
+        """
+        Initialize LLM clients with API keys from Valves.
+        This is called lazily when API keys are available.
+        """
+        if not self.valves.groq_api_key:
+            logger.warning("Cannot initialize LLM clients: groq_api_key is not set")
+            return
+            
+        logger.debug("Initializing LLM clients with API keys from Valves")
+        
+        # 1. General LLM
+        self.general_model = ChatGroq(
+            groq_api_key=self.valves.groq_api_key,
+            model="llama-3.3-70b-versatile",
+            temperature=0,
+            streaming=True
+        )
+
+        # 2. Tool-Use LLM - Initialize the Groq client with instructor for structured output
+        groq_client = Groq(api_key=self.valves.groq_api_key)
+        self.structured_client = from_groq(groq_client, mode=instructor.Mode.JSON)
+        
+        # Keep the regular tool model for backward compatibility
+        self.tool_model = ChatGroq(
+            groq_api_key=self.valves.groq_api_key,
+            model=self.tool_model_name,
+            temperature=self.tool_temperature,
+            model_kwargs={"reasoning_format": "parsed"}
+        )
+        
+        # Bind tools to the regular LangChain tool model
+        self.tool_model_with_tools = self.tool_model.bind_tools(self.tools)
+        
+        # Set flag to indicate clients are initialized
+        self._clients_initialized = True
+        
+        logger.debug("LLM clients initialized successfully")
+
         
 
     # Initialize pipeline (ie. once at start) to define the neo4j URL and the LLMs to use
@@ -383,10 +422,6 @@ class Pipe:
         self.is_first_tool_status_update = True # Flag for delayed status updates
         self.tool_status_lock = asyncio.Lock() # Lock for handling parallel status updates
         
-        # Configure API keys in tool modules from Valves
-        # This ensures tools use the API keys configured in OpenWebUI without hardcoding them
-        self._configure_tool_api_keys()
-        
         # Not sure if i need this, but openwebui tools docs say to set citation to False if you want to customise the citation event ... wont hurt to keep just in case
         # self.citation = False
 
@@ -394,29 +429,17 @@ class Pipe:
         if self.local_testing:
             self.mock_event_emitter = self.create_mock_event_emitter()
         
-        # // Initialize all LLMs using API key and models //
-
-        # 1. Router LLM (in order of pref)
-        # Initialize the router directly - it now creates its own groq client with instructor
-        self.router = Router(groq_api_key=self.valves.groq_api_key)
-
-        # 2. General LLM (in order of pref)
-        self.general_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model="llama-3.3-70b-versatile", temperature=0, streaming=True) # Basic start w fast and general intellgent llama3 70B, TO DO: switch to Mistral
-
-
-        # 3. Tool-Use LLM (in order of pref) - Must be a LLM that features tool use (llama3, etc.)
-        # Initialize the Groq client with instructor for structured output
-        groq_client = Groq(api_key=self.valves.groq_api_key)
-        # Set up instructor client with debug mode
-
-        # instructor.patch() is not needed - from_groq() already patches the client
-        self.structured_client = from_groq(groq_client, mode=instructor.Mode.JSON)
+        # // Initialize LLM configurations (clients will be initialized lazily when needed) //
         self.tool_model_name = "qwen/qwen3-32b"
         self.tool_temperature = 0.6
         
-        # Keep the regular tool model for backward compatibility
-        self.tool_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model=self.tool_model_name, temperature=self.tool_temperature, model_kwargs={"reasoning_format": "parsed"})
-
+        # Initialize clients as None - they'll be created when first needed
+        self._clients_initialized = False  # Flag for lazy initialization
+        self.general_model = None
+        self.structured_client = None
+        self.tool_model = None
+        self.tool_model_with_tools = None
+        
         # Define tools for both regular ChatGroq and instructor
         self.tools = [
             # RULAC tools
@@ -437,12 +460,6 @@ class Pipe:
             get_combined_news
         ]
         
-        # Bind tools to the regular LangChain tool model
-        self.tool_model_with_tools = self.tool_model.bind_tools(self.tools)
-        
-        # Convert LangChain tools to OpenAI-compatible format for instructor
-        # This will be used in handle_tool_query method
-        
         # Add default tool-friendly names for UI status updates, they are later updated to the friendly names in the handle_tool_query method
         self.tool_friendly_names = {
             "get_armed_conflict_data_by_country": "Researching state actor involvement in armed conflicts",
@@ -458,6 +475,12 @@ class Pipe:
             "brave_search": "Searching the web for info"
         }
         
+        # If we have API keys available (local testing), initialize now
+        if self.valves.groq_api_key:
+            self._initialize_llm_clients()
+            # Configure API keys in tool modules from Valves
+            self._configure_tool_api_keys()
+        
     def _configure_tool_api_keys(self):
         """
         Configure API keys in tool modules from the Valves system.
@@ -465,6 +488,14 @@ class Pipe:
         without hardcoding them in the tool files.
         """
         try:
+            # Check for required API keys
+            if not self.valves.brave_search_api_key:
+                logger.warning(
+                    "⚠️ brave_search_api_key is not configured in Valves. "
+                    "Tools like brave_search, NEWS_tools, and HRW_tools will fail. "
+                    "Please configure this in the pipeline Valves settings."
+                )
+            
             # Import and configure NEWS tools with dedicated news Groq key
             from tools import NEWS_tools
             # Use dedicated news key if available, otherwise fall back to main key
@@ -475,18 +506,24 @@ class Pipe:
                     brave_api_key=self.valves.brave_search_api_key
                 )
                 logger.debug("Configured API keys for NEWS_tools (using dedicated news key)")
+            elif not self.valves.brave_search_api_key:
+                logger.warning("Skipping NEWS_tools configuration: brave_search_api_key missing")
             
             # Import and configure BRAVE tools
             from tools import BRAVE_tools
             if self.valves.brave_search_api_key:
                 BRAVE_tools.set_brave_api_key(self.valves.brave_search_api_key)
                 logger.debug("Configured API key for BRAVE_tools")
+            else:
+                logger.warning("Skipping BRAVE_tools configuration: brave_search_api_key missing")
             
             # Import and configure HRW tools
             from tools import HRW_tools
             if self.valves.brave_search_api_key:
                 HRW_tools.set_brave_api_key(self.valves.brave_search_api_key)
                 logger.debug("Configured API key for HRW_tools")
+            else:
+                logger.warning("Skipping HRW_tools configuration: brave_search_api_key missing")
                 
         except Exception as e:
             logger.warning(f"Failed to configure tool API keys: {e}")
@@ -616,6 +653,28 @@ class Pipe:
 # BODY: {'model': 'argos_agent_v1_mar_2025', 'messages': [{'role': 'user', 'content': 'Here is the query:\nWhat is the human rights situation in Somalia?\n\nCreate a concise, 3-5 word phrase as a title for the previous query. Avoid quotation marks or special formatting. RESPOND ONLY WITH THE TITLE TEXT.\n\nExamples of titles:\nUkraine Conflict Classification\nUganda Press Freedom\nRacial Justice in USA\nEU Judicial Reform\nLGBTQ+ Rights in China'}], 'stream': False, 'max_completion_tokens': 1000}
 
 
+        # Lazy initialization: ensure LLM clients are initialized before use
+        # This is needed for OpenWebUI where Valves are configured after __init__
+        if not self._clients_initialized and self.valves.groq_api_key:
+            logger.info("Initializing LLM clients on first pipe execution")
+            self._initialize_llm_clients()
+            self._configure_tool_api_keys()
+            
+            # Warn if Brave key is missing (tools will fail)
+            if not self.valves.brave_search_api_key:
+                logger.error(
+                    "⚠️ WARNING: brave_search_api_key is not configured! "
+                    "Web search, news, and HRW tools will fail. "
+                    "Please configure this in Valves settings."
+                )
+        elif not self._clients_initialized:
+            error_msg = (
+                "❌ API keys not configured. Please set your API keys in the pipeline Valves settings:\n"
+                "Required: groq_api_key, brave_search_api_key"
+            )
+            logger.error(error_msg)
+            return error_msg
+
         # # check if the body contains a request to generate a title, as they always start with "Here is the query:"  
         # if "Here is the query:" in body.get("messages", [{}])[0].get("content", ""):
         #     print("Title Generation Method 1: Using 'in' operator")
@@ -719,79 +778,8 @@ class Pipe:
         # Return streaming response generator to OpenWebUI
         return result
 
-    def handle_general_query(self, conversation_messages: list[dict]) -> Generator[str, None, None]:
-        """
-        Handles general queries that don't require research tools.
-        
-        This function is used when the router determines that the user's query
-        can be answered directly without utilizing specialized research tools.
-        It formats messages with a system prompt and streams a response from
-        the general model.
-        
-        Args:
-            conversation_messages: List of conversation messages from the user
-            
-        Returns:
-            Generator that yields streaming tokens as they are produced
-        """
-        # Debug shape of conversation messages
-        # logger.debug(f"Actual Conversation Messages passed in: {conversation_messages}")
-
-        # STEP 1: Set up the system prompt with general Argos capabilities
-        FINAL_SYSTEM_PROMPT = final_argos_base_model_prompt.PROMPT
-
-        # Add current date/time for temporal context
-        currentDateTime = datetime.now(ZoneInfo("Europe/Paris")).strftime("%B %d, %Y %I:%M %p")
-
-        # Create a PromptTemplate and render it with variables
-        FINAL_PROMPT = PromptTemplate(
-                input_variables=["currentDateTime"],
-                template=FINAL_SYSTEM_PROMPT,
-            )
-
-        rendered_prompt = FINAL_PROMPT.format(
-                currentDateTime=currentDateTime,
-            )
-
-        # STEP 2: Prepare messages array starting with system prompt
-        system_argos_and_cleaned_conversation_messages = [
-            SystemMessage(content=rendered_prompt),
-        ]
-
-        # STEP 3: Convert conversation messages to LangChain format
-        for msg in conversation_messages:
-            role = msg.get("role", "").lower()
-            content = msg.get("content", "")
-            if role == "user":
-                system_argos_and_cleaned_conversation_messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                system_argos_and_cleaned_conversation_messages.append(AIMessage(content=content))
-            elif role == "system":
-                # In case system messages are passed in the conversation
-                system_argos_and_cleaned_conversation_messages.append(SystemMessage(content=content))
-            else:
-                # Skip unrecognized roles
-                logger.debug(f"Unrecognized role '{role}' in message; skipping.")
-
-        # Log final messages for debugging
-        log_final_messages(system_argos_and_cleaned_conversation_messages, "Argos Base Agent Complete Messages")
-
-        logger.debug("Inside general query final response; starting synchronous streaming...")
-
-        # STEP 4: Stream response from the general model
-        try:
-            # Get streaming generator from the general model
-            stream = self.general_model.stream(system_argos_and_cleaned_conversation_messages, stop=None)
-            for i, chunk in enumerate(stream):
-                if hasattr(chunk, "content"):
-                    yield chunk.content
-                else:
-                    logger.debug(f"Chunk {i} has no 'content' attribute.")
-            logger.debug("Finished processing all chunks.")
-        except Exception as e:
-            logger.error(f"Streaming invocation failed: {e}")
-            yield f"Error: {e}"
-
+    # handle_general_query() method removed - Router is no longer used
+    # All queries now go directly to tool agent for research and response generation
 
     async def handle_tool_query(self, messages: list[dict]) -> list[dict]:
         """
