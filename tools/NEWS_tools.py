@@ -2010,18 +2010,20 @@ You should return json according to the following schema, including all fields:
 """
         
         # User message to explicitly request the summary
-        user_prompt = "Please provide a detailed, factual summary of this article in 3+ paragraphs."
+        user_prompt = "Provide a detailed, factual summary of this article in 3+ paragraphs."
         
         # Make API call using instructor for automatic parsing and validation
         try:
             validated_response = await client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="llama-3.3-70b-versatile",  # More reliable model for structured output
+                # model="llama-3.1-8b-instant", # faster and cheaper than the 70b model, but not as reliable for structured output
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0,
-                response_model=ArticleSummarySchema
+                response_model=ArticleSummarySchema,
+                max_retries=2  # Retry if it fails
             )
             
             # Sanitize the summary by removing newlines
