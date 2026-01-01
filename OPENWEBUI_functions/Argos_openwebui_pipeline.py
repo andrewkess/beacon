@@ -307,23 +307,23 @@ class Pipe:
     class Valves(BaseModel):
         MODEL_ID: str = Field(default="argos", description="Model ID for the Argos project")
         groq_api_key: str = Field(
-            default_factory=lambda: os.getenv("GROQ_API_KEY", ""),
+            default="",
             description="API key for Groq (main Argos LLMs)"
         )
         groq_api_key_news: str = Field(
-            default_factory=lambda: os.getenv("GROQ_API_KEY_NEWS", ""),
+            default="",
             description="API key for Groq (news summarization)"
         )
         mistral_api_key: str = Field(
-            default_factory=lambda: os.getenv("MISTRAL_API_KEY", ""),
+            default="",
             description="API key for Mistral"
         )
         deepseek_api_key: str = Field(
-            default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""),
+            default="",
             description="API key for Deepseek"
         )
         brave_search_api_key: str = Field(
-            default_factory=lambda: os.getenv("BRAVE_SEARCH_API_KEY", ""),
+            default="",
             description="API key for Brave Search"
         )
         
@@ -331,6 +331,22 @@ class Pipe:
         searxng_url: str = Field("http://localhost:8081/search", description="SearXNG API URL")
         ignored_websites: str = Field("", description="Comma-separated list of websites to ignore in search results")
         page_content_words_limit: int = Field(5000, description="Limit words content for each page")
+        
+        # Override model_post_init to load from environment if empty (for local testing)
+        def model_post_init(self, __context):
+            """Load API keys from environment variables if not set via Valves"""
+            import os
+            # Only load from environment if the field is empty
+            if not self.groq_api_key:
+                self.groq_api_key = os.getenv("GROQ_API_KEY", "")
+            if not self.groq_api_key_news:
+                self.groq_api_key_news = os.getenv("GROQ_API_KEY_NEWS", "")
+            if not self.mistral_api_key:
+                self.mistral_api_key = os.getenv("MISTRAL_API_KEY", "")
+            if not self.deepseek_api_key:
+                self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "")
+            if not self.brave_search_api_key:
+                self.brave_search_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
 
         
 
