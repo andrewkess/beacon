@@ -66,8 +66,9 @@ API_RPS = 1
 API_RATE_LIMIT = AsyncLimiter(API_RPS, 1)
 API_TIMEOUT = 20
 
-# Brave Search API Key
-API_KEY = "BSAsCIPqaPLhXXcAs1ysPXNIWhVP0gw"
+# Brave Search API Key - should be set via environment variable or passed from pipeline
+import os
+API_KEY = os.getenv("BRAVE_SEARCH_API_KEY", "")
 
 # Brave Search API host
 API_HOST = "https://api.search.brave.com"
@@ -83,6 +84,21 @@ API_HEADERS = {
     "web": {"X-Subscription-Token": API_KEY, "Api-Version": "2023-10-11"},
     "summarizer": {"X-Subscription-Token": API_KEY, "Api-Version": "2024-04-23"},
 }
+
+def set_brave_api_key(api_key: str):
+    """
+    Set Brave API key dynamically from the pipeline's Valves system.
+    Updates both the global API_KEY and the headers.
+    
+    Args:
+        api_key: Brave Search API key
+    """
+    global API_KEY, API_HEADERS
+    API_KEY = api_key
+    API_HEADERS = {
+        "web": {"X-Subscription-Token": API_KEY, "Api-Version": "2023-10-11"},
+        "summarizer": {"X-Subscription-Token": API_KEY, "Api-Version": "2024-04-23"},
+    }
 
 class BraveSearchSummary(BaseModel):
     """Model for Brave search summary results"""
@@ -380,4 +396,29 @@ async def test_brave_search():
 
 # Run test when executed directly
 if __name__ == "__main__":
+    # Load environment variables from .env file for local testing
+    try:
+        from dotenv import load_dotenv
+        # Try to load from parent directory (where .env should be)
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)  # Force override system env vars
+            print(f"✓ Loaded .env file from: {env_path} (with override)")
+        else:
+            # Try current directory
+            load_dotenv(override=True)  # Force override system env vars
+            print("✓ Attempted to load .env from current directory (with override)")
+        
+        # Update API_KEY and headers with loaded environment variable
+        loaded_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
+        if loaded_key:
+            set_brave_api_key(loaded_key)
+            print(f"✓ Brave API key loaded successfully (length: {len(loaded_key)})")
+        else:
+            print("⚠ Warning: BRAVE_SEARCH_API_KEY not found in environment")
+            
+    except ImportError:
+        print("⚠ Warning: python-dotenv not installed. Install with: pip install python-dotenv")
+        print("  Or export environment variables manually before running")
+    
     asyncio.run(test_brave_search()) 

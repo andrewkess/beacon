@@ -27,9 +27,10 @@ from tools.RULAC_tools import (
 )
 
 # Global configuration values
+# NOTE: API keys should be set via environment variables or passed from the pipeline's Valves
 tool_specific_values = {
     "BRAVE_SEARCH_API_BASE_URL": "https://api.search.brave.com/res/v1/web/search",
-    "BRAVE_SEARCH_API_KEY": "BSAsCIPqaPLhXXcAs1ysPXNIWhVP0gw",
+    "BRAVE_SEARCH_API_KEY": os.getenv("BRAVE_SEARCH_API_KEY", ""),
     "PAGE_CONTENT_WORDS_LIMIT": 4000,
 }
 
@@ -47,6 +48,24 @@ COMMON_HEADERS = [
         "X-Subscription-Token": tool_specific_values["BRAVE_SEARCH_API_KEY"]
     }
 ]
+
+def set_brave_api_key(api_key: str):
+    """
+    Set Brave API key dynamically from the pipeline's Valves system.
+    Updates both the global config and headers.
+    
+    Args:
+        api_key: Brave Search API key
+    """
+    global COMMON_HEADERS
+    tool_specific_values["BRAVE_SEARCH_API_KEY"] = api_key
+    COMMON_HEADERS = [
+        {
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "X-Subscription-Token": api_key
+        }
+    ]
 
 def get_request_headers(custom_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """
@@ -521,6 +540,40 @@ async def get_human_rights_research_by_country(country: str) -> RULAC_TOOL_RESUL
 
 if __name__ == "__main__":
     import asyncio
+    
+    # Enable logging for local testing so we can see the output
+    # Directly modify the module-level variable
+    import sys
+    current_module = sys.modules[__name__]
+    current_module.LOGGING_ENABLED = True
+    # Set logger to DEBUG level to see detailed output
+    logger.setLevel(logging.DEBUG)
+    print("✓ Logging enabled for local testing (DEBUG level)\n")
+    
+    # Load environment variables from .env file for local testing
+    try:
+        from dotenv import load_dotenv
+        # Try to load from parent directory (where .env should be)
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)  # Force override system env vars
+            print(f"✓ Loaded .env file from: {env_path} (with override)")
+        else:
+            # Try current directory
+            load_dotenv(override=True)  # Force override system env vars
+            print("✓ Attempted to load .env from current directory (with override)")
+        
+        # Update Brave API key with loaded environment variable
+        loaded_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
+        if loaded_key:
+            set_brave_api_key(loaded_key)
+            print(f"✓ Brave API key loaded successfully (length: {len(loaded_key)})")
+        else:
+            print("⚠ Warning: BRAVE_SEARCH_API_KEY not found in environment")
+            
+    except ImportError:
+        print("⚠ Warning: python-dotenv not installed. Install with: pip install python-dotenv")
+        print("  Or export environment variables manually before running")
     
     async def run_tests():
         """Run all test functions"""

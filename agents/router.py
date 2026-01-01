@@ -83,10 +83,17 @@ class Router:
     """Router class that analyzes user intent and determines which LLM to use"""
     # When used within the Beacon pipeline, the router model is passed in as a parameter
     # When used standalone, the router model is initialized here
-    def __init__(self, router_model=None):
-        """Initialize router with a language model"""
+    def __init__(self, router_model=None, groq_api_key: str = None):
+        """
+        Initialize router with a language model.
+        
+        Args:
+            router_model: Optional router model (legacy support)
+            groq_api_key: Optional Groq API key. If not provided, uses environment variable.
+        """
         # Router LLM setup
-        self.groq_api_key = "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"
+        import os
+        self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY", "")
         self.model_name = "gemma2-9b-it" # or llama-3.1-8b-instant
         self.temperature = 0
         

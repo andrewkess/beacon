@@ -38,13 +38,39 @@ from tools.RULAC_tools import (
 )
 
 # Global configuration values
+# NOTE: API keys should be set via environment variables or passed from the pipeline's Valves
 tool_specific_values = {
     "BRAVE_SEARCH_API_BASE_URL": "https://api.search.brave.com/res/v1/web/search",
     "BRAVE_SEARCH_NEWS_API_BASE_URL": "https://api.search.brave.com/res/v1/news/search",
-    "BRAVE_SEARCH_API_KEY": "BSAsCIPqaPLhXXcAs1ysPXNIWhVP0gw",
+    "BRAVE_SEARCH_API_KEY": os.getenv("BRAVE_SEARCH_API_KEY", ""),
     "PAGE_CONTENT_WORDS_LIMIT": 4000,
-    "GROQ_API_KEY": "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",
+    # Use dedicated news key if available, otherwise fall back to main Groq key
+    "GROQ_API_KEY": os.getenv("GROQ_API_KEY_NEWS", os.getenv("GROQ_API_KEY", "")),
 }
+
+def set_api_keys(groq_api_key: str = None, brave_api_key: str = None):
+    """
+    Set API keys dynamically from the pipeline's Valves system.
+    This allows the pipeline to pass API keys configured in OpenWebUI without hardcoding them.
+    
+    Args:
+        groq_api_key: API key for Groq (can be dedicated news key or main key)
+        brave_api_key: API key for Brave Search
+    """
+    global COMMON_HEADERS
+    
+    if groq_api_key:
+        tool_specific_values["GROQ_API_KEY"] = groq_api_key
+    if brave_api_key:
+        tool_specific_values["BRAVE_SEARCH_API_KEY"] = brave_api_key
+        # IMPORTANT: Update COMMON_HEADERS with the new API key
+        COMMON_HEADERS = [
+            {
+                "Accept": "application/json",
+                "Accept-Encoding": "gzip",
+                "X-Subscription-Token": brave_api_key
+            }
+        ]
 
 # Global logging control flag
 LOGGING_ENABLED = False
@@ -2043,18 +2069,59 @@ You should return json according to the following schema, including all fields:
 if __name__ == "__main__":
     import asyncio
     
+    # Enable logging for local testing so we can see the output
+    # Directly modify the module-level variable
+    import sys
+    current_module = sys.modules[__name__]
+    current_module.LOGGING_ENABLED = True
+    # Set logger to DEBUG level to see detailed output
+    logger.setLevel(logging.DEBUG)
+    print("✓ Logging enabled for local testing (DEBUG level)\n")
+    
+    # Load environment variables from .env file for local testing
+    try:
+        from dotenv import load_dotenv
+        # Try to load from parent directory (where .env should be)
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)  # Force override system env vars
+            print(f"✓ Loaded .env file from: {env_path} (with override)")
+        else:
+            # Try current directory
+            load_dotenv(override=True)  # Force override system env vars
+            print("✓ Attempted to load .env from current directory (with override)")
+        
+        # Update API keys with loaded environment variables
+        groq_key = os.getenv("GROQ_API_KEY_NEWS") or os.getenv("GROQ_API_KEY", "")
+        brave_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
+        
+        if groq_key and brave_key:
+            set_api_keys(groq_api_key=groq_key, brave_api_key=brave_key)
+            print(f"✓ API keys loaded successfully")
+            print(f"  - Groq key length: {len(groq_key)}")
+            print(f"  - Brave key length: {len(brave_key)}")
+        else:
+            if not groq_key:
+                print("⚠ Warning: GROQ_API_KEY not found in environment")
+            if not brave_key:
+                print("⚠ Warning: BRAVE_SEARCH_API_KEY not found in environment")
+            
+    except ImportError:
+        print("⚠ Warning: python-dotenv not installed. Install with: pip install python-dotenv")
+        print("  Or export environment variables manually before running")
+    
     async def run_tests():
         """Run all test functions"""
         log("STARTING NEWS TOOLS TESTS", "title")
         
         # Test scenarios for news sources
         news_test_scenarios = [
-            # {
-            #     "name": "Get News about deepseek",
-            #     "params": {
-            #         "search_query": "deepseek"
-            #     },
-            # },
+            {
+                "name": "Get News about deepseek",
+                "params": {
+                    "search_query": "deepseek"
+                },
+            },
             # {
             #     "name": "Get News about Technology",
             #     "params": {

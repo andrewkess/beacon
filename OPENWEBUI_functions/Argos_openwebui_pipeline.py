@@ -240,11 +240,27 @@ def load_template_from_path(file_path: str) -> str:
     with open(file_path, "r", encoding="utf-8") as file:
         return file.read()
 
-def generate_title(body: dict) -> str:
-    """Generate a concise title using Groq LLM based on the user's query"""
+def generate_title(body: dict, groq_api_key: str = None) -> str:
+    """
+    Generate a concise title using Groq LLM based on the user's query.
+    
+    Args:
+        body: Request body containing messages
+        groq_api_key: Optional Groq API key. If not provided, uses environment variable.
+    
+    Returns:
+        JSON string with the generated title
+    """
     try:
+        # Get API key from parameter or environment variable
+        api_key = groq_api_key or os.getenv("GROQ_API_KEY", "")
+        
+        if not api_key:
+            logger.warning("No Groq API key available for title generation")
+            return json.dumps({"title": "New Chat"})
+        
         # Initialize Groq client
-        chat_client = Groq(api_key="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")
+        chat_client = Groq(api_key=api_key)
         
         # Get the user's message
         messages = body.get("messages", [])
@@ -280,7 +296,7 @@ def generate_title(body: dict) -> str:
         return json.dumps({"title": title})
         
     except Exception as e:
-        print(f"Error generating title: {e}")
+        logger.error(f"Error generating title: {e}")
         return json.dumps({"title": "New Chat"})
 
 # // PIPELINE //
@@ -290,9 +306,26 @@ class Pipe:
     # Setup user-configurable Valves providing API keys and access
     class Valves(BaseModel):
         MODEL_ID: str = Field(default="argos", description="Model ID for the Argos project")
-        groq_api_key: str = Field("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", description="API key for Groq")
-        mistral_api_key: str = Field("9hblEwepQtzvyY9y4incc3yvApk4ArJO", description="API key for Mistral")
-        deepseek_api_key: str = Field("sk-28cf4f690b704c76b3f3c6622d7b87cd", description="API key for Deepseek")
+        groq_api_key: str = Field(
+            default_factory=lambda: os.getenv("GROQ_API_KEY", ""),
+            description="API key for Groq (main Argos LLMs)"
+        )
+        groq_api_key_news: str = Field(
+            default_factory=lambda: os.getenv("GROQ_API_KEY_NEWS", ""),
+            description="API key for Groq (news summarization)"
+        )
+        mistral_api_key: str = Field(
+            default_factory=lambda: os.getenv("MISTRAL_API_KEY", ""),
+            description="API key for Mistral"
+        )
+        deepseek_api_key: str = Field(
+            default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""),
+            description="API key for Deepseek"
+        )
+        brave_search_api_key: str = Field(
+            default_factory=lambda: os.getenv("BRAVE_SEARCH_API_KEY", ""),
+            description="API key for Brave Search"
+        )
         
         # Web search tool parameters
         searxng_url: str = Field("http://localhost:8081/search", description="SearXNG API URL")
@@ -312,11 +345,31 @@ class Pipe:
 
         self.valves = self.Valves()
         self.local_testing = local_testing  # Set local testing flag
+        
+        # Debug: Print what the Valves actually received
+        if local_testing:
+            print(f"\n🔍 DEBUG: Valves initialized with:")
+            print(f"  - groq_api_key length: {len(self.valves.groq_api_key)}")
+            if self.valves.groq_api_key:
+                print(f"  - groq_api_key preview: {self.valves.groq_api_key[:8]}...{self.valves.groq_api_key[-8:]}")
+                # Check if it matches what we loaded
+                env_key = os.getenv("GROQ_API_KEY", "")
+                if self.valves.groq_api_key == env_key:
+                    print(f"  - ✓ Matches environment variable")
+                else:
+                    print(f"  - ✗ WARNING: Does NOT match environment variable!")
+                    print(f"  - Env key length: {len(env_key)}, Valve key length: {len(self.valves.groq_api_key)}")
+            print()
+        
         self.global_unique_citations_retreived = set()
         self.global_citation_count = 0  # Reset the citation count at the start of each pipe run
         self.event_emitter = None  # Will be set in pipe() method
         self.is_first_tool_status_update = True # Flag for delayed status updates
         self.tool_status_lock = asyncio.Lock() # Lock for handling parallel status updates
+        
+        # Configure API keys in tool modules from Valves
+        # This ensures tools use the API keys configured in OpenWebUI without hardcoding them
+        self._configure_tool_api_keys()
         
         # Not sure if i need this, but openwebui tools docs say to set citation to False if you want to customise the citation event ... wont hurt to keep just in case
         # self.citation = False
@@ -329,9 +382,7 @@ class Pipe:
 
         # 1. Router LLM (in order of pref)
         # Initialize the router directly - it now creates its own groq client with instructor
-        self.router = Router()
-        # Set the API key from valves
-        self.router.groq_api_key = self.valves.groq_api_key
+        self.router = Router(groq_api_key=self.valves.groq_api_key)
 
         # 2. General LLM (in order of pref)
         self.general_model = ChatGroq(groq_api_key=self.valves.groq_api_key, model="llama-3.3-70b-versatile", temperature=0, streaming=True) # Basic start w fast and general intellgent llama3 70B, TO DO: switch to Mistral
@@ -390,6 +441,40 @@ class Pipe:
             "get_combined_news": "Analyzing latest news and developments",
             "brave_search": "Searching the web for info"
         }
+        
+    def _configure_tool_api_keys(self):
+        """
+        Configure API keys in tool modules from the Valves system.
+        This method is called during initialization to pass API keys to tool modules
+        without hardcoding them in the tool files.
+        """
+        try:
+            # Import and configure NEWS tools with dedicated news Groq key
+            from tools import NEWS_tools
+            # Use dedicated news key if available, otherwise fall back to main key
+            news_groq_key = self.valves.groq_api_key_news or self.valves.groq_api_key
+            if news_groq_key and self.valves.brave_search_api_key:
+                NEWS_tools.set_api_keys(
+                    groq_api_key=news_groq_key,
+                    brave_api_key=self.valves.brave_search_api_key
+                )
+                logger.debug("Configured API keys for NEWS_tools (using dedicated news key)")
+            
+            # Import and configure BRAVE tools
+            from tools import BRAVE_tools
+            if self.valves.brave_search_api_key:
+                BRAVE_tools.set_brave_api_key(self.valves.brave_search_api_key)
+                logger.debug("Configured API key for BRAVE_tools")
+            
+            # Import and configure HRW tools
+            from tools import HRW_tools
+            if self.valves.brave_search_api_key:
+                HRW_tools.set_brave_api_key(self.valves.brave_search_api_key)
+                logger.debug("Configured API key for HRW_tools")
+                
+        except Exception as e:
+            logger.warning(f"Failed to configure tool API keys: {e}")
+            logger.warning("Tools will fall back to environment variables if available")
         
     def create_mock_event_emitter(self):
         """Creates a mock event emitter for local testing that displays events in the console
@@ -528,8 +613,8 @@ class Pipe:
         if __task__ == "title_generation":
             if logger.isEnabledFor(logging.INFO):
                 print("Title Generation Method detected: Using task")
-            # call the generate_title function
-            title = generate_title(body)
+            # call the generate_title function with API key from Valves
+            title = generate_title(body, groq_api_key=self.valves.groq_api_key)
             if logger.isEnabledFor(logging.INFO):
                 print(f"\nGenerated Title: {title}")
             # return the title and exit the pipeline immediately
@@ -2038,6 +2123,43 @@ def test_pipe():
     """
     Basic test function for the Argos pipeline.
     """
+    # Load environment variables from .env file for local testing
+    try:
+        from dotenv import load_dotenv
+        import os
+        # Try to load from parent directory (where .env should be)
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=True)  # Force override system env vars
+            print(f"✓ Loaded .env file from: {env_path} (with override)")
+        else:
+            # Try current directory
+            load_dotenv(override=True)  # Force override system env vars
+            print("✓ Attempted to load .env from current directory (with override)")
+        
+        # Verify API keys are loaded
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        groq_news_key = os.getenv("GROQ_API_KEY_NEWS", "")
+        brave_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
+        
+        print(f"✓ API keys status:")
+        print(f"  - GROQ_API_KEY: {'✓ loaded' if groq_key else '✗ missing'} (length: {len(groq_key)})")
+        if groq_key:
+            # Check for whitespace issues
+            if groq_key != groq_key.strip():
+                print(f"    ⚠ WARNING: Key has leading/trailing whitespace!")
+                print(f"    Original length: {len(groq_key)}, Stripped length: {len(groq_key.strip())}")
+            # Show first and last 4 characters for verification
+            print(f"    Preview: {groq_key[:8]}...{groq_key[-8:]}")
+        
+        print(f"  - GROQ_API_KEY_NEWS: {'✓ loaded' if groq_news_key else '⚠ using main key'} (length: {len(groq_news_key)})")
+        print(f"  - BRAVE_SEARCH_API_KEY: {'✓ loaded' if brave_key else '✗ missing'} (length: {len(brave_key)})")
+        print()
+        
+    except ImportError:
+        print("⚠ Warning: python-dotenv not installed. Install with: pip install python-dotenv")
+        print("  Or export environment variables manually before running")
+    
     # Initialize the Pipe with local testing enabled
     pipe = Pipe(local_testing=True)
 
