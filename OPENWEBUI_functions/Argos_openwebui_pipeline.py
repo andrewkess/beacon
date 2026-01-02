@@ -1,12 +1,12 @@
 """
 description: Argos is an AI assistant specialized in armed conflict analysis, human rights and international humanitarian law.
-requirements: coloredlogs==15.0.1, aiolimiter, instructor, groq==0.21.0, langgraph, langchain-groq==0.2.1, langchain-core==0.3.35, langchain-community==0.3.10, pydantic==2.10.3, fastapi==0.115.6, asyncio, langchain-neo4j==0.3.0, requests==2.32.3, langchain-mistralai==0.2.6, rich, openai, mistralai, beautifulsoup4==4.12.3
+requirements: coloredlogs==15.0.1, aiolimiter, instructor, rich, openai, mistralai, beautifulsoup4==4.12.3, langchain-mistralai
 """
 from typing import AsyncGenerator
 from typing import Any, Awaitable, Callable
 from langchain_groq import ChatGroq
 from groq import Groq
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from fastapi import Request
@@ -54,6 +54,13 @@ if os.path.exists("/app/backend/beacon_code"):
     # Ensure that the mounted volume is in sys.path so that the beacon_code package can be found.
     sys.path.insert(0, "/app/backend/beacon_code")
     print("DEBUG: Updated sys.path:", sys.path)
+else:
+    # For local development, add the beacon directory to sys.path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    beacon_dir = os.path.dirname(current_dir)  # Go up one level from OPENWEBUI_functions to beacon
+    if beacon_dir not in sys.path:
+        sys.path.insert(0, beacon_dir)
+        print(f"DEBUG: Added local beacon directory to sys.path: {beacon_dir}")
 
 # Load public files from either local files or on server if os path exists
 try:
@@ -299,6 +306,136 @@ def generate_title(body: dict, groq_api_key: str = None) -> str:
         logger.error(f"Error generating title: {e}")
         return json.dumps({"title": "New Chat"})
 
+def generate_follow_up(body: dict, groq_api_key: str = None) -> str:
+    """
+    Generate follow-up questions using Groq LLM based on the conversation.
+    
+    Args:
+        body: Request body containing messages
+        groq_api_key: Optional Groq API key. If not provided, uses environment variable.
+    
+    Returns:
+        JSON string with the generated follow-up questions
+    """
+    try:
+        # Get API key from parameter or environment variable
+        api_key = groq_api_key or os.getenv("GROQ_API_KEY", "")
+        
+        if not api_key:
+            logger.warning("No Groq API key available for follow-up generation")
+            # Return default questions in the correct format
+            return json.dumps({"follow_ups": [
+                "What are the latest developments in this situation?",
+                "How does international law apply here?", 
+                "What human rights concerns are involved?"
+            ]})
+        
+        # Initialize Groq client
+        chat_client = Groq(api_key=api_key)
+        
+        # Get the conversation messages
+        messages = body.get("messages", [])
+        if not messages:
+            return json.dumps({"follow_ups": [
+                "What are the latest developments in this situation?",
+                "How does international law apply here?", 
+                "What human rights concerns are involved?"
+            ]})
+        
+        # Build conversation context for follow-up generation
+        conversation_context = ""
+        for msg in messages[-6:]:  # Use last 6 messages for context
+            role = msg.get("role", "").capitalize()
+            content = msg.get("content", "")
+            if content:
+                conversation_context += f"{role}: {content}\n\n"
+        
+        # Create prompt for follow-up generation (based on OpenWebUI's template)
+        follow_up_prompt = f"""### Task:
+Suggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion about human rights, armed conflict, and international law.
+
+### Guidelines:
+- Write all follow-up questions from the user's point of view, directed to the assistant.
+- Make questions concise, clear, and directly related to the discussed topic(s).
+- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.
+- Focus on human rights, conflicts, international law, and related topics.
+- Use English language.
+- Response must be a JSON array of strings, no extra text or formatting.
+
+### Output:
+JSON format: {{"follow_ups": ["Question 1?", "Question 2?", "Question 3?"]}}
+
+### Chat History:
+{conversation_context}"""
+
+        # Format messages for the LLM
+        completion = chat_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": follow_up_prompt}],
+            temperature=0.3,
+            max_tokens=200,
+            stream=False
+        )
+        
+        # Extract the follow-up questions from the response
+        response = completion.choices[0].message.content.strip()
+        
+        # Try to parse as JSON object or array
+        try:
+            parsed_response = json.loads(response)
+            
+            # Check if it's already in the correct format
+            if isinstance(parsed_response, dict) and "follow_ups" in parsed_response:
+                follow_up_questions = parsed_response["follow_ups"]
+                if isinstance(follow_up_questions, list):
+                    valid_questions = [q for q in follow_up_questions if isinstance(q, str) and len(q.strip()) > 0][:5]
+                    logger.info(f"Generated follow-up questions: {valid_questions}")
+                    return json.dumps({"follow_ups": valid_questions})
+            
+            # Check if it's just an array
+            elif isinstance(parsed_response, list):
+                valid_questions = [q for q in parsed_response if isinstance(q, str) and len(q.strip()) > 0][:5]
+                logger.info(f"Generated follow-up questions: {valid_questions}")
+                return json.dumps({"follow_ups": valid_questions})
+                
+        except json.JSONDecodeError:
+            pass
+            
+        # Fallback: try to extract questions from text
+        lines = response.split('\n')
+        questions = []
+        for line in lines:
+            line = line.strip()
+            if line and ('?' in line or line.endswith('.')):
+                # Clean up the line
+                line = re.sub(r'^[\d\-\*\.\s]+', '', line)  # Remove numbering/bullets
+                line = line.strip('"\'')  # Remove quotes
+                if len(line) > 10:  # Ensure it's substantial
+                    questions.append(line)
+                    if len(questions) >= 3:
+                        break
+        
+        if not questions:
+            # Default follow-up questions for Argos
+            questions = [
+                "What are the latest developments in this situation?",
+                "How does international law apply here?",
+                "What human rights concerns are involved?"
+            ]
+        
+        logger.info(f"Generated follow-up questions (fallback): {questions[:5]}")
+        # Return in the correct OpenWebUI format
+        return json.dumps({"follow_ups": questions[:5]})
+        
+    except Exception as e:
+        logger.error(f"Error generating follow-up questions: {e}")
+        # Return in the correct OpenWebUI format
+        return json.dumps({"follow_ups": [
+            "What are the latest developments in this situation?",
+            "How does international law apply here?", 
+            "What human rights concerns are involved?"
+        ]})
+
 # // PIPELINE //
 
 class Pipe:
@@ -376,7 +513,7 @@ class Pipe:
             groq_api_key=self.valves.groq_api_key,
             model=self.tool_model_name,
             temperature=self.tool_temperature,
-            model_kwargs={"reasoning_format": "parsed"}
+            reasoning_format="parsed"
         )
         
         # Bind tools to the regular LangChain tool model
@@ -694,8 +831,19 @@ class Pipe:
                 print(f"\nGenerated Title: {title}")
             # return the title and exit the pipeline immediately
             return title
+        
+        # check if task is follow-up generation
+        elif __task__ == "follow_up_generation":
+            if logger.isEnabledFor(logging.INFO):
+                print("Follow-up Generation Method detected: Using task")
+            # call the generate_follow_up function with API key from Valves
+            follow_up = generate_follow_up(body, groq_api_key=self.valves.groq_api_key)
+            if logger.isEnabledFor(logging.INFO):
+                print(f"\nGenerated Follow-up: {follow_up}")
+            # return the follow-up questions and exit the pipeline immediately
+            return follow_up
         else:
-            # print("Title Generation Method not detected: Continuing with pipeline")
+            # print("Special task not detected: Continuing with pipeline")
             pass
 
         # return "Test Output"
@@ -2303,8 +2451,57 @@ LGBTQ+ Rights in China"""
     # Run the test
     asyncio.run(run_test())
 
+def test_follow_up_generation():
+    """Test the follow-up generation functionality of the pipeline"""
+    # Initialize the Pipe with local testing enabled
+    pipe = Pipe(local_testing=True)
+
+    # Mock user data
+    __user__ = {
+        "id": "test123",
+        "email": "test@example.com", 
+        "name": "Test User",
+        "role": "tester"
+    }
+
+    # Sample body with conversation for follow-up generation
+    test_body = {
+        "model": "argos_agent_v1_mar_2025",
+        "messages": [
+            {
+                "role": "user",
+                "content": "How is the Ukraine conflict classified according to RULAC?"
+            },
+            {
+                "role": "assistant", 
+                "content": "According to RULAC (Rule of Law in Armed Conflict), the situation in Ukraine is classified as an International Armed Conflict (IAC) between Russia and Ukraine since February 24, 2022. This classification is based on the direct military involvement of Russian armed forces in the conflict against Ukrainian government forces. The conflict involves state parties (Russia vs Ukraine) and meets the threshold for international armed conflict under international humanitarian law."
+            },
+            {
+                "role": "user",
+                "content": "What are the latest developments in this conflict?"
+            }
+        ],
+        "stream": False,
+        "max_completion_tokens": 1000
+    }
+
+    async def run_test():
+        print("\n[bold yellow]Testing Follow-up Generation[/]")
+        result = await pipe.pipe(
+            test_body, 
+            __user__, 
+            None, 
+            local_testing=True,
+            __task__="follow_up_generation"
+        )
+        print(f"\nGenerated Follow-up: {result}")
+
+    # Run the test
+    asyncio.run(run_test())
+
 if __name__ == "__main__":
     test_pipe()
     print("\n" + "="*50 + "\n")
-    # test_title_generation()
+    test_title_generation()
+    test_follow_up_generation()
 

@@ -1,16 +1,43 @@
-coloredlogs
-langgraph
-langchain-groq
-langchain-core
-langchain-community
-pydantic
-fastapi
-asyncio
-langchain-neo4j
-requests
-pytest
+# Core packages matching OpenWebUI v0.6.43 Docker environment
+# Updated: 2026-01-01 based on OpenWebUI installation logs
+
+# LangChain ecosystem (matching OpenWebUI versions)
+langchain==1.2.0
+langchain-core==1.2.4
+langchain-groq==1.1.1
+langchain-neo4j==0.6.0
+langchain-ollama==1.0.1
+langchain-mistralai>=0.2.6
+langchain-community>=0.3.10
+langgraph==1.0.5
+
+# API clients (matching OpenWebUI versions)
+groq==0.37.1
+pydantic==2.12.5
+requests==2.32.5
+
+# Development and testing
+pytest==8.4.2
 pytest-asyncio
-rich
-langchain-ollama
-langchain-mistralai
+fastapi>=0.115.6
+
+# Additional packages for Argos pipeline
+coloredlogs==15.0.1
+aiolimiter==1.2.1
+instructor==1.13.0
+rich==13.9.4
+openai==2.14.0
+mistralai==1.10.0
+beautifulsoup4==4.12.3
 PySocks
+fake-useragent==2.2.0
+
+# Neo4j dependencies (matching OpenWebUI)
+neo4j==5.28.2
+neo4j-graphrag==1.11.0
+
+# Supporting packages (matching OpenWebUI)
+asyncio==4.0.0
+fsspec==2024.12.0
+json-repair==0.44.1
+types-pyyaml==6.0.12.20250915
