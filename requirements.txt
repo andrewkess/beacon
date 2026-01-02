@@ -1,47 +1,49 @@
-# Core packages matching OpenWebUI v0.6.43 Docker environment
-# Updated: 2026-01-01 based on OpenWebUI installation logs
+# Core packages for local development environment
+# Updated: 2026-01-02 based on actual OpenWebUI container inspection
+# Note: Many packages are pre-installed in OpenWebUI container but needed for local dev
 
-# LangChain ecosystem (matching OpenWebUI versions)
+# LangChain ecosystem - ALREADY IN OPENWEBUI CONTAINER:
 langchain==1.2.0
 langchain-core==1.2.4
-langchain-groq==1.1.1
-langchain-neo4j==0.6.0
-langchain-ollama==1.0.1
-langchain-mistralai>=0.2.6
+langchain-mistralai==1.1.1  # Actually IS in container
 langchain-community>=0.3.10
 langgraph==1.0.5
 
-# API clients (matching OpenWebUI versions)
+# LangChain ecosystem - MISSING FROM OPENWEBUI CONTAINER:
+langchain-groq==1.1.1
+langchain-neo4j==0.6.0
+langchain-ollama==1.0.1
+
+# API clients - ALREADY IN OPENWEBUI CONTAINER:
 groq==0.37.1
 pydantic==2.12.5
 requests==2.32.5
+openai==2.14.0
+mistralai==1.10.0
+instructor==1.13.0
+rich==13.9.4
+beautifulsoup4==4.12.3
+coloredlogs==15.0.1
+aiolimiter==1.2.1
+fake-useragent==2.2.0
 
-# Development and testing
+# Development and testing (for local dev only)
 pytest==8.4.2
 pytest-asyncio
 fastapi>=0.115.6
-
-# Additional packages for Argos pipeline
-coloredlogs==15.0.1
-aiolimiter==1.2.1
-instructor==1.13.0
-rich==13.9.4
-openai==2.14.0
-mistralai==1.10.0
-beautifulsoup4==4.12.3
 PySocks
-fake-useragent==2.2.0
+
+# Neo4j dependencies - MISSING FROM OPENWEBUI CONTAINER:
+neo4j==5.28.2
+neo4j-graphrag==1.11.0
 
 # OpenTelemetry packages (compatible with mistralai requirements)
+# These may help reduce Docker log warnings but are optional
 opentelemetry-api>=1.38.0,<2.0.0
 opentelemetry-sdk>=1.38.0,<2.0.0
 opentelemetry-semantic-conventions>=0.59b0,<0.60
 
-# Neo4j dependencies (matching OpenWebUI)
-neo4j==5.28.2
-neo4j-graphrag==1.11.0
-
-# Supporting packages (matching OpenWebUI)
+# Supporting packages for local development
 asyncio==4.0.0
 fsspec==2024.12.0
 json-repair==0.44.1
