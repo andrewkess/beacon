@@ -1,4 +1,7 @@
 """
+id: argosdefaultmodel
+name: Argos
+type: pipe
 description: Argos is an AI assistant specialized in armed conflict analysis, human rights and international humanitarian law.
 requirements: coloredlogs==15.0.1, aiolimiter, instructor, rich, openai, mistralai, beautifulsoup4==4.12.3, langchain-mistralai>=0.2.6, langchain-groq==1.1.1, langchain-neo4j==0.6.0, langchain-ollama==1.0.1, neo4j==5.28.2, neo4j-graphrag==1.11.0
 """
