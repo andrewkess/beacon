@@ -32,6 +32,11 @@ beautifulsoup4==4.12.3
 PySocks
 fake-useragent==2.2.0
 
+# OpenTelemetry packages (compatible with mistralai requirements)
+opentelemetry-api>=1.38.0,<2.0.0
+opentelemetry-sdk>=1.38.0,<2.0.0
+opentelemetry-semantic-conventions>=0.59b0,<0.60
+
 # Neo4j dependencies (matching OpenWebUI)
 neo4j==5.28.2
 neo4j-graphrag==1.11.0
